@@ -207,3 +207,29 @@ def test_without_any_rate_for_the_hint_currency_the_charge_is_not_ruled_out():
     gift = auth("gift", amount="89", currency="USD", rate="1", country="US", code="59")
     result = run(Hints(amount=Decimal("1450"), currency="BRL"), [gift])
     assert result.authorization.id == "gift"
+
+
+def test_a_wrong_day_hint_is_relaxed_when_it_rules_out_everything():
+    """Models sometimes invent days_ago=0 when the ticket never says when. The day is the
+    weakest hint: if it excludes every decline, match on the other hints instead."""
+    yesterday = auth("bar", merchant="Bar do Ze", when=TICKET - timedelta(hours=26))
+    result = run(Hints(merchant="Bar do Ze", days_ago=0), [yesterday])
+    assert result.status is MatchStatus.MATCH
+    assert result.authorization.id == "bar"
+
+
+def test_relaxing_the_day_can_still_be_ambiguous():
+    a = auth("a", merchant="Uber", when=TICKET - timedelta(days=3))
+    b = auth("b", merchant="Uber", when=TICKET - timedelta(days=4))
+    assert run(Hints(merchant="Uber", days_ago=0), [a, b]).status is MatchStatus.AMBIGUOUS
+
+
+def test_a_correct_day_hint_still_disambiguates():
+    today = auth("today", merchant="Uber", when=TICKET - timedelta(hours=1))
+    older = auth("older", merchant="Uber", when=TICKET - timedelta(days=3))
+    assert run(Hints(merchant="Uber", days_ago=0), [today, older]).authorization.id == "today"
+
+
+def test_relaxing_the_day_never_turns_a_non_decline_into_a_match():
+    approved = auth("ok", merchant="Bar", code="00", when=TICKET - timedelta(days=2))
+    assert run(Hints(merchant="Bar", days_ago=0), [approved]).status is not MatchStatus.MATCH

@@ -141,3 +141,9 @@ def test_out_of_contract_model_output_is_repaired_or_escalated(fields):
 def test_out_of_contract_output_fixed_on_repair_is_accepted():
     result, _ = run("tarjeta rechazada", [reply(language="fr"), reply(language="es")])
     assert result.intent is Intent.CARD_DECLINE
+
+
+def test_prompt_tells_the_model_not_to_guess_the_day():
+    from decline_desk.agent.triage import SYSTEM_PROMPT
+
+    assert "null unless" in SYSTEM_PROMPT and "do not guess" in SYSTEM_PROMPT.lower()
