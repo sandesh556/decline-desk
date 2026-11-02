@@ -4,7 +4,7 @@ The rules never trust the code alone. Each code is checked against the data, and
 the data can't explain becomes INCONSISTENT (escalate), never a guess.
 """
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -14,6 +14,7 @@ from decline_desk.domain.models import (
     Card,
     CardControls,
     Company,
+    PendingTopup,
 )
 from decline_desk.rules.diagnose import Cause, Context, diagnose
 
@@ -146,3 +147,93 @@ def test_evidence_mentions_the_card_by_last4_only():
 def test_rejects_a_card_that_does_not_match_the_authorization():
     with pytest.raises(ValueError, match="card"):
         diagnose(make_auth("62", card_id="card_other"), make_ctx())
+
+
+# --- limits -------------------------------------------------------------------------------
+
+
+def spent(amount, when, code="00", id_=None):
+    return make_auth(code, amount=amount, when=when, id_=id_ or f"prior_{when:%H%M}_{amount}")
+
+
+def test_daily_limit_counts_earlier_approved_spend_the_same_local_day():
+    earlier = [spent("300", T - timedelta(hours=4)), spent("150", T - timedelta(hours=2))]
+    d = diagnose(make_auth("61", amount="100"), make_ctx(day_auths=earlier))
+    assert d.causes == (Cause.LIMIT_DAILY,)
+    assert "$550" in d.findings[0].evidence and "$500" in d.findings[0].evidence
+
+
+def test_daily_day_boundary_is_the_company_timezone_not_utc():
+    # 03:00 UTC on Oct 28 is 22:00 on Oct 27 in Bogota: a different day for the limit.
+    prev_local_day = [spent("450", datetime(2026, 10, 28, 3, 0, tzinfo=UTC))]
+    d = diagnose(make_auth("61", amount="100"), make_ctx(day_auths=prev_local_day))
+    assert d.causes[0] is Cause.INCONSISTENT  # in UTC it would wrongly look like LIMIT_DAILY
+
+    # 06:00 UTC is 01:00 on Oct 28 in Bogota: same local day, so it counts.
+    same_local_day = [spent("450", datetime(2026, 10, 28, 6, 0, tzinfo=UTC))]
+    d = diagnose(make_auth("61", amount="100"), make_ctx(day_auths=same_local_day))
+    assert d.causes == (Cause.LIMIT_DAILY,)
+
+
+def test_declined_and_later_authorizations_do_not_count_toward_daily_spend():
+    noise = [
+        spent("400", T - timedelta(hours=1), code="51"),  # declined, money never moved
+        spent("400", T + timedelta(minutes=5)),  # after this decline
+    ]
+    d = diagnose(make_auth("61", amount="150"), make_ctx(day_auths=noise))
+    assert d.causes[0] is Cause.INCONSISTENT
+
+
+def test_amount_exactly_at_the_per_txn_limit_is_allowed():
+    d = diagnose(make_auth("61", amount="200"), make_ctx(per_txn="200"))
+    assert d.causes[0] is Cause.INCONSISTENT  # 200 <= 200, so the limit was not the reason
+
+
+def test_local_currency_over_the_limit_only_after_conversion():
+    # 900,000 COP at 0.00025 = $225 > $200, though 900,000 "looks" fine to a human
+    d = diagnose(
+        make_auth("61", amount="900000", currency="COP", rate="0.00025"), make_ctx(per_txn="200")
+    )
+    assert d.causes == (Cause.LIMIT_PER_TXN,)
+    assert "$225.00" in d.findings[0].evidence
+
+
+# --- funds --------------------------------------------------------------------------------
+
+
+def topup(eta, amount="2500"):
+    return PendingTopup(
+        id="tp_1", company_id="co_1", amount_usd=Decimal(amount), asset="USDC", eta=eta
+    )
+
+
+def test_insufficient_funds_with_a_pending_stablecoin_topup():
+    d = diagnose(
+        make_auth("51", amount="120"),
+        make_ctx(wallet="60", topups=[topup(T + timedelta(hours=2, minutes=30))]),
+    )
+    assert d.causes == (Cause.FUNDS_PENDING_SETTLEMENT,)
+    assert "USDC" in d.findings[0].evidence
+    assert "17:30 UTC" in d.findings[0].evidence
+    assert d.escalate is False
+
+
+def test_earliest_pending_topup_is_reported():
+    d = diagnose(
+        make_auth("51", amount="120"),
+        make_ctx(
+            wallet="60", topups=[topup(T + timedelta(hours=5)), topup(T + timedelta(hours=1))]
+        ),
+    )
+    assert "16:00 UTC" in d.findings[0].evidence
+
+
+def test_insufficient_funds_without_any_topup():
+    d = diagnose(make_auth("51", amount="120"), make_ctx(wallet="60"))
+    assert d.causes == (Cause.COMPANY_FUNDS_LOW,)
+
+
+def test_insufficient_funds_code_but_wallet_covers_it_is_inconsistent():
+    d = diagnose(make_auth("51", amount="120"), make_ctx(wallet="1000"))
+    assert d.causes[0] is Cause.INCONSISTENT
+    assert d.escalate is True
