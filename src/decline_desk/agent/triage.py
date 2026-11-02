@@ -39,7 +39,9 @@ Return only a JSON object with these keys:
 - country: ISO alpha-2 country of the purchase if stated or clearly implied, or null
 - amount: the amount they mention as a plain number (e.g. "50 mil pesos" -> 50000), or null
 - currency: "USD", "COP", "MXN" or "BRL" if stated or clearly implied, or null
-- days_ago: 0 for today, 1 for yesterday/ayer/ontem, etc., or null if not said"""
+- days_ago: 0 for today, 1 for yesterday/ayer/ontem, etc. It must be null unless the
+  employee explicitly says when it happened. Do not guess: "during dinner"
+  with no day mentioned is null."""
 
 
 class Intent(StrEnum):

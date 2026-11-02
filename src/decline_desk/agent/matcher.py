@@ -48,6 +48,12 @@ def match(
     rates = {a.currency: a.usd_per_unit for a in authorizations}
     fitting = [a for a in in_window if _fits(a, hints, ticket_time, tz, rates)]
     declines = [a for a in fitting if a.is_declined]
+    if not declines and hints.days_ago is not None:
+        # The day is the weakest hint (people misremember it, models sometimes invent it).
+        # If it rules out every decline, match on the other hints instead.
+        relaxed = hints.model_copy(update={"days_ago": None})
+        fitting = [a for a in in_window if _fits(a, relaxed, ticket_time, tz, rates)]
+        declines = [a for a in fitting if a.is_declined]
 
     if len(declines) == 1:
         return MatchResult(MatchStatus.MATCH, declines[0], tuple(declines))
