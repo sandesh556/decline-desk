@@ -24,10 +24,18 @@ def luhn_valid(digits: str) -> bool:
 
 
 def _mask_card(match: re.Match[str]) -> str:
-    digits = re.sub(r"[ -]", "", match.group())
-    if 13 <= len(digits) <= 19 and luhn_valid(digits):
-        return f"**** {digits[-4:]}"
+    if _is_card(match.group()):
+        return f"**** {re.sub(r'[ -]', '', match.group())[-4:]}"
     return match.group()
+
+
+def contains_card_number(text: str) -> bool:
+    return any(_is_card(m.group()) for m in _CARD.finditer(text))
+
+
+def _is_card(candidate: str) -> bool:
+    digits = re.sub(r"[ -]", "", candidate)
+    return 13 <= len(digits) <= 19 and luhn_valid(digits)
 
 
 def mask_pii(text: str) -> str:
