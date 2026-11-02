@@ -7,6 +7,7 @@ lives in the services (approvals enforce admin-of-company), not in the templates
 
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, Form, Request
@@ -15,7 +16,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from decline_desk.demo import Services
 from decline_desk.domain.models import Employee
-from decline_desk.policy.approvals import ApprovalStatus
+from decline_desk.policy.approvals import ApprovalStatus, Forbidden, InvalidTransition
 from decline_desk.repo import NotFound
 from decline_desk.store import StoredTicket
 
@@ -47,6 +48,14 @@ FLAG_TEXT = {
     "injection_suspected": "Possible prompt injection in the ticket text",
     "draft_rejected": "The model's draft failed the reply check; the template reply is used",
     "draft_fallback": "The drafting model was unavailable; the template reply is used",
+}
+
+
+# Result messages come from this fixed table; the URL only carries a code, so it can't be
+# used to show arbitrary text on a trusted page.
+MESSAGES = {
+    "approved": "Action approved and executed.",
+    "rejected": "Action rejected.",
 }
 
 
@@ -174,7 +183,53 @@ def create_app(svc: Services) -> FastAPI:
         t = svc.store.get(ticket_id, user.company_id)
         if t is None:
             return not_found(user)
-        return ticket_page(user, t, message=request.query_params.get("msg", ""))
+        return ticket_page(user, t, message=MESSAGES.get(request.query_params.get("msg", ""), ""))
+
+    def cross_site(request: Request) -> bool:
+        """Refuse state-changing requests sent from another site (CSRF defence in depth,
+        alongside the SameSite=Lax cookie)."""
+        origin = request.headers.get("origin")
+        return origin is not None and urlsplit(origin).netloc != request.url.netloc
+
+    def decide(ticket_id: str, request: Request, act):
+        user = current_user(request)
+        if user is None:
+            return RedirectResponse("/", status_code=303)
+        if cross_site(request):
+            return HTMLResponse("Cross-site request refused.", status_code=403)
+        t = svc.store.get(ticket_id, user.company_id)
+        if t is None:
+            return not_found(user)
+        pending_id = t.view.get("pending_action_id")
+        if not pending_id:
+            return ticket_page(user, t, "No action is waiting for approval on this ticket.", 409)
+        try:
+            code = act(user, pending_id)
+        except Forbidden:
+            return ticket_page(user, t, "Only a company admin can approve or reject actions.", 403)
+        except InvalidTransition:
+            return ticket_page(user, t, "This action has already been decided.", 409)
+        except ValueError as exc:
+            return ticket_page(user, t, str(exc), 400)
+        return RedirectResponse(f"/tickets/{ticket_id}?msg={code}", status_code=303)
+
+    @app.post("/tickets/{ticket_id}/approve")
+    def approve(ticket_id: str, request: Request):
+        def act(user: Employee, pending_id: str) -> str:
+            svc.approvals.approve(pending_id, approver_id=user.id)
+            return "approved"
+
+        return decide(ticket_id, request, act)
+
+    @app.post("/tickets/{ticket_id}/reject")
+    def reject(ticket_id: str, request: Request, reason: str = Form("")):
+        def act(user: Employee, pending_id: str) -> str:
+            if not reason.strip():
+                raise ValueError("Please give a reason for rejecting.")
+            svc.approvals.reject(pending_id, approver_id=user.id, reason=reason.strip())
+            return "rejected"
+
+        return decide(ticket_id, request, act)
 
     @app.post("/login")
     def login(user: str = Form(...)):
