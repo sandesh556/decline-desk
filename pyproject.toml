@@ -47,6 +47,7 @@ known-first-party = ["decline_desk"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S105", "S106"]  # fake credentials in tests are intentional
+"src/decline_desk/data/seed.py" = ["E501"]  # scenario tables read best one row per line
 
 [tool.coverage.run]
 source = ["src/decline_desk"]
