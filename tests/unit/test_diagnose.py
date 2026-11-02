@@ -237,3 +237,62 @@ def test_insufficient_funds_code_but_wallet_covers_it_is_inconsistent():
     d = diagnose(make_auth("51", amount="120"), make_ctx(wallet="1000"))
     assert d.causes[0] is Cause.INCONSISTENT
     assert d.escalate is True
+
+
+# --- inconsistency, expiry boundary, multiple causes ---------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("code", "auth_kw", "ctx_kw"),
+    [
+        ("62", {"country": "CO"}, {"countries": ("CO",)}),  # country is allowed
+        ("57", {"mcc": "5812"}, {"blocked": ("5813",)}),  # category not blocked
+        ("78", {}, {"status": "active"}),  # card is not frozen
+        ("54", {}, {"expires": date(2028, 1, 31)}),  # card is valid
+    ],
+)
+def test_code_the_data_cannot_explain_is_inconsistent_and_escalates(code, auth_kw, ctx_kw):
+    d = diagnose(make_auth(code, **auth_kw), make_ctx(**ctx_kw))
+    assert Cause.INCONSISTENT in d.causes
+    assert d.escalate is True
+
+
+def test_card_is_valid_through_its_expiry_date():
+    on_expiry_day = make_auth("54", when=datetime(2026, 10, 31, 20, 0, tzinfo=UTC))
+    d = diagnose(on_expiry_day, make_ctx(expires=date(2026, 10, 31)))
+    assert d.causes[0] is Cause.INCONSISTENT
+
+    day_after = make_auth("54", when=datetime(2026, 11, 1, 20, 0, tzinfo=UTC))
+    assert diagnose(day_after, make_ctx(expires=date(2026, 10, 31))).causes[0] is Cause.CARD_EXPIRED
+
+
+def test_multiple_causes_are_all_reported_in_fix_first_order():
+    # Blocked category AND wrong country AND over the per-transaction limit.
+    d = diagnose(
+        make_auth("57", mcc="5813", country="MX", amount="250"),
+        make_ctx(blocked=("5813",), countries=("CO",), per_txn="200"),
+    )
+    assert d.causes == (Cause.COUNTRY_RESTRICTED, Cause.MCC_BLOCKED, Cause.LIMIT_PER_TXN)
+
+
+def test_expired_comes_before_frozen_because_unfreezing_an_expired_card_is_pointless():
+    d = diagnose(make_auth("78"), make_ctx(status="frozen_by_user", expires=date(2026, 9, 30)))
+    assert d.causes == (Cause.CARD_EXPIRED, Cause.CARD_FROZEN_BY_USER)
+
+
+def test_inconsistent_code_still_reports_real_violations_first():
+    d = diagnose(
+        make_auth("62", country="CO", mcc="5813"),
+        make_ctx(countries=("CO",), blocked=("5813",)),
+    )
+    assert d.causes == (Cause.MCC_BLOCKED, Cause.INCONSISTENT)
+
+
+def test_a_cause_is_never_reported_twice():
+    d = diagnose(make_auth("62", country="MX"), make_ctx(countries=("CO",)))
+    assert d.causes == (Cause.COUNTRY_RESTRICTED,)
+
+
+def test_unknown_code_does_not_pick_up_secondary_guesses():
+    d = diagnose(make_auth("Q9", country="MX"), make_ctx(countries=("CO",)))
+    assert d.causes == (Cause.UNKNOWN,)
