@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Inbox - DeclineDesk{% endblock %}
+{% block content %}
+<h1>Decline tickets <span class="muted">- {{ company.name }}</span></h1>
+{% if rows %}
+<table>
+  <thead><tr><th>Ticket</th><th>Employee</th><th>Status</th><th>Received</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+  <tr>
+    <td><a href="/tickets/{{ r.ticket.id }}">{{ r.ticket.text | truncate(70) }}</a></td>
+    <td>{{ r.employee_name }}</td>
+    <td><span class="label{% if r.attention %} attention{% endif %}">{{ r.label }}</span></td>
+    <td class="muted">{{ r.received }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="panel muted">No tickets yet.</div>
+{% endif %}
+{% endblock %}

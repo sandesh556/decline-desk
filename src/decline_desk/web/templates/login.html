@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Sign in - DeclineDesk{% endblock %}
+{% block content %}
+<h1>Sign in as</h1>
+<p class="muted">Demo only: pick a person to see the inbox from their point of view.</p>
+<form class="panel row" method="post" action="/login">
+  <select name="user" aria-label="Person">
+    {% for e, company in people %}
+    <option value="{{ e.id }}">{{ e.name }}{% if e.is_admin %} (admin){% endif %} - {{ company }}</option>
+    {% endfor %}
+  </select>
+  <button class="btn" type="submit">Continue</button>
+</form>
+{% endblock %}
