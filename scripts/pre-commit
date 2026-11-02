@@ -1,0 +1,6 @@
+#!/bin/sh
+# Block commits that contain a real-looking API key. Installed by `make hooks`.
+files=$(git diff --cached --name-only --diff-filter=ACM)
+[ -z "$files" ] && exit 0
+# shellcheck disable=SC2086
+exec uv run --quiet python -m decline_desk.secret_scan $files
