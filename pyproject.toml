@@ -42,5 +42,11 @@ target-version = "py312"
 select = ["E", "F", "I", "B", "UP", "S"]
 ignore = ["S101"]  # assert is fine in tests
 
+[tool.ruff.lint.isort]
+known-first-party = ["decline_desk"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S105", "S106"]  # fake credentials in tests are intentional
+
 [tool.coverage.run]
 source = ["src/decline_desk"]
