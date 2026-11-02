@@ -156,3 +156,10 @@ class Card(Frozen):
     last4: str = Field(pattern=r"^\d{4}$")  # never store the full PAN
     status: CardStatus
     expires: date
+
+
+class Ticket(Frozen):
+    id: Text
+    employee_id: Text
+    text: str  # may be empty: the resolver asks for details instead of failing
+    created_at: UtcDatetime
