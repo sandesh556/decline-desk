@@ -43,7 +43,10 @@ def match(
         (a for a in authorizations if ticket_time - WINDOW <= a.created_at <= ticket_time),
         key=lambda a: (-a.created_at.timestamp(), a.id),  # newest first, ties by id
     )
-    fitting = [a for a in in_window if _fits(a, hints, ticket_time, tz)]
+    # Rates the employee's own authorizations captured, per currency, so an amount stated
+    # in one currency can be compared with a charge made in another.
+    rates = {a.currency: a.usd_per_unit for a in authorizations}
+    fitting = [a for a in in_window if _fits(a, hints, ticket_time, tz, rates)]
     declines = [a for a in fitting if a.is_declined]
 
     if len(declines) == 1:
@@ -61,12 +64,12 @@ def _has_any(h: Hints) -> bool:
     return any(v is not None for v in (merchant, h.country, h.amount, h.days_ago))
 
 
-def _fits(a: Authorization, h: Hints, ticket_time: datetime, tz: ZoneInfo) -> bool:
+def _fits(a: Authorization, h: Hints, ticket_time: datetime, tz: ZoneInfo, rates: dict) -> bool:
     if _norm(h.merchant or "") and not _merchant_fits(h.merchant, a.merchant_name):
         return False
     if h.country and h.country != a.country:
         return False
-    if h.amount is not None and not _amount_fits(h.amount, h.currency, a):
+    if h.amount is not None and not _amount_fits(h.amount, h.currency, a, rates):
         return False
     if h.days_ago is not None:
         wanted = ticket_time.astimezone(tz).date() - timedelta(days=h.days_ago)
@@ -85,11 +88,13 @@ def _merchant_fits(hint: str, merchant: str) -> bool:
     return bool(h) and (h in m or m in h)
 
 
-def _amount_fits(amount: Decimal, currency: Currency | None, a: Authorization) -> bool:
+def _amount_fits(amount: Decimal, currency: Currency | None, a: Authorization, rates: dict) -> bool:
     if currency is None or currency is a.currency:
-        actual = a.amount
-    elif currency is Currency.USD:
-        actual = a.amount_usd
+        return abs(a.amount - amount) <= amount * AMOUNT_TOLERANCE
+    if currency is Currency.USD:
+        stated_usd = amount
+    elif currency in rates:
+        stated_usd = amount * rates[currency]
     else:
-        return True  # different local currency with no rate for it: don't rule it out
-    return abs(actual - amount) <= amount * AMOUNT_TOLERANCE
+        return True  # no rate for the stated currency: don't rule the charge out
+    return abs(a.amount_usd - stated_usd) <= stated_usd * AMOUNT_TOLERANCE
