@@ -3,9 +3,9 @@
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from enum import StrEnum
-from typing import Annotated
+from typing import Annotated, Literal
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class Currency(StrEnum):
@@ -72,6 +72,61 @@ class Authorization(Frozen):
         from decline_desk.fx import to_usd  # local import: fx depends on this module
 
         return to_usd(self.amount, self.currency, self.usd_per_unit)
+
+
+def _iana_timezone(value: str) -> str:
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+    try:
+        ZoneInfo(value)
+    except (ZoneInfoNotFoundError, ValueError) as exc:
+        raise ValueError(f"unknown timezone: {value}") from exc
+    return value
+
+
+NonNegativeMoney = Annotated[Decimal, Field(ge=0)]
+
+
+class Company(Frozen):
+    id: str
+    name: str
+    timezone: Annotated[str, AfterValidator(_iana_timezone)]  # defines the "day" for limits
+    wallet_balance_usd: NonNegativeMoney  # settled stablecoin balance backing the cards
+    limit_cap_usd: PositiveMoney  # most an admin may raise any card limit to
+
+
+class Employee(Frozen):
+    id: str
+    company_id: str
+    name: str
+    language: Literal["es", "pt", "en"]
+    is_admin: bool = False
+
+
+def _country_codes(values: frozenset[str]) -> frozenset[str]:
+    return frozenset(v.upper() for v in values)
+
+
+class CardControls(Frozen):
+    card_id: str
+    per_txn_limit_usd: PositiveMoney
+    daily_limit_usd: PositiveMoney
+    blocked_mccs: frozenset[str]
+    allowed_countries: Annotated[frozenset[str], AfterValidator(_country_codes)]
+
+    @model_validator(mode="after")
+    def _daily_covers_single(self) -> "CardControls":
+        if self.daily_limit_usd < self.per_txn_limit_usd:
+            raise ValueError("daily limit must be at least the per-transaction limit")
+        return self
+
+
+class PendingTopup(Frozen):
+    id: str
+    company_id: str
+    amount_usd: PositiveMoney
+    asset: str  # e.g. USDC
+    eta: UtcDatetime  # expected on-chain settlement time
 
 
 class CardStatus(StrEnum):
