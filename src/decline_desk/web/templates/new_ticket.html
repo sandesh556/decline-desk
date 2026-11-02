@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}New ticket - DeclineDesk{% endblock %}
+{% block content %}
+<p><a href="/">Back to inbox</a></p>
+<h1>New ticket</h1>
+{% if message %}<div class="notice">{{ message }}</div>{% endif %}
+{% if live %}
+<p class="muted">Write as {{ user.name }} would, in Spanish, Portuguese or English. It is resolved with real model calls ({{ models[0] }} for triage, {{ models[1] }} for the reply).</p>
+<form class="panel" method="post" action="/tickets/new">
+  <textarea name="text" rows="5" maxlength="{{ max_chars }}" aria-label="Ticket text"
+            style="width:100%;font:inherit;padding:8px;border:1px solid var(--line);border-radius:4px"
+            placeholder="Mi tarjeta fue rechazada en un Uber en Mexico ayer"></textarea>
+  <p><button class="btn" type="submit">Submit ticket</button></p>
+</form>
+{% else %}
+<div class="panel">
+  <p>Live mode is off, so new tickets can't be resolved. The inbox shows a scripted demo.</p>
+  <p>To try your own tickets, create an API key with Anthropic, OpenAI or Google (see
+  "Use a real model" in the README), then set <code>LLM_MODE=live</code>,
+  <code>LLM_PROVIDER</code> and that provider's key in <code>.env</code>, and restart.</p>
+</div>
+{% endif %}
+{% endblock %}

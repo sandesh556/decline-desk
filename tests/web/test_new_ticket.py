@@ -95,3 +95,19 @@ def test_overlong_ticket_is_rejected_before_any_model_call(live_client):
     resp = signed_in(client, "emp_maria").post("/tickets/new", data={"text": "a" * 5001})
     assert resp.status_code == 400
     assert llm.calls == []
+
+
+def test_entry_point_builds_a_demo_app_without_a_key():
+    from decline_desk.config import Settings
+    from decline_desk.web.main import build_app
+
+    page = TestClient(build_app(Settings(_env_file=None))).get("/")
+    assert page.status_code == 200
+
+
+def test_entry_point_in_live_mode_without_a_key_fails_with_a_clear_message():
+    from decline_desk.config import Settings, SettingsError
+    from decline_desk.web.main import build_app
+
+    with pytest.raises(SettingsError, match="OPENAI_API_KEY"):
+        build_app(Settings(_env_file=None, llm_mode="live", llm_provider="openai"))

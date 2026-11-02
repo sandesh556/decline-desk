@@ -5,7 +5,10 @@ never inject markup. Identity is a demo cookie picked on the sign-in page. Autho
 lives in the services (approvals enforce admin-of-company), not in the templates.
 """
 
+import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
@@ -14,8 +17,11 @@ from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
+from decline_desk.agent.resolver import resolve
+from decline_desk.data.seed import BASE_TIME
 from decline_desk.demo import Services
-from decline_desk.domain.models import Employee
+from decline_desk.domain.models import Employee, Ticket
+from decline_desk.llm.client import LLMClient
 from decline_desk.policy.approvals import ApprovalStatus, Forbidden, InvalidTransition
 from decline_desk.repo import NotFound
 from decline_desk.store import StoredTicket
@@ -82,11 +88,29 @@ class Row:
     received: str
 
 
-def create_app(svc: Services) -> FastAPI:
+MAX_TICKET_INPUT = 5000
+
+
+def create_app(
+    svc: Services,
+    *,
+    client: LLMClient | None = None,
+    models: tuple[str, str] = ("claude-haiku-4-5", "claude-sonnet-5-5"),
+    clock: Callable[[], datetime] = lambda: BASE_TIME + timedelta(minutes=45),
+) -> FastAPI:
+    """client is the live LLM client, or None in fake mode (new tickets are then disabled).
+    clock defaults to a moment just after the seeded data, so "yesterday" in a new ticket
+    lines up with the demo history."""
     app = FastAPI(title="DeclineDesk", docs_url=None, redoc_url=None)
 
     def page(name: str, status_code: int = 200, **ctx) -> HTMLResponse:
         return HTMLResponse(TEMPLATES.get_template(name).render(**ctx), status_code=status_code)
+
+    def cross_site(request: Request) -> bool:
+        """Refuse state-changing requests sent from another site (CSRF defence in depth,
+        alongside the SameSite=Lax cookie)."""
+        origin = request.headers.get("origin")
+        return origin is not None and urlsplit(origin).netloc != request.url.netloc
 
     def current_user(request: Request) -> Employee | None:
         user_id = request.cookies.get("user")
@@ -179,6 +203,49 @@ def create_app(svc: Services) -> FastAPI:
             message=message,
         )
 
+    def new_ticket_page(user: Employee, message: str = "", status_code: int = 200):
+        return page(
+            "new_ticket.html",
+            status_code,
+            user=user,
+            live=client is not None,
+            models=models,
+            max_chars=MAX_TICKET_INPUT,
+            message=message,
+        )
+
+    @app.get("/tickets/new", response_class=HTMLResponse)
+    def new_ticket_form(request: Request) -> HTMLResponse:
+        user = current_user(request)
+        return login_page() if user is None else new_ticket_page(user)
+
+    @app.post("/tickets/new")
+    def new_ticket(request: Request, text: str = Form("")):
+        user = current_user(request)
+        if user is None:
+            return RedirectResponse("/", status_code=303)
+        if cross_site(request):
+            return HTMLResponse("Cross-site request refused.", status_code=403)
+        if client is None:
+            return new_ticket_page(user, "Live mode is off; see below.", 409)
+        if len(text) > MAX_TICKET_INPUT:
+            return new_ticket_page(
+                user, f"Please keep it under {MAX_TICKET_INPUT} characters.", 400
+            )
+        ticket = Ticket(
+            id=f"t_{uuid.uuid4().hex[:10]}", employee_id=user.id, text=text, created_at=clock()
+        )
+        res = resolve(
+            ticket,
+            repo=svc.repo,
+            client=client,
+            approvals=svc.approvals,
+            triage_model=models[0],
+            resolver_model=models[1],
+        )
+        svc.store.save(ticket, user.company_id, res)
+        return RedirectResponse(f"/tickets/{ticket.id}", status_code=303)
+
     @app.get("/tickets/{ticket_id}", response_class=HTMLResponse)
     def ticket(ticket_id: str, request: Request) -> HTMLResponse:
         user = current_user(request)
@@ -188,12 +255,6 @@ def create_app(svc: Services) -> FastAPI:
         if t is None:
             return not_found(user)
         return ticket_page(user, t, message=MESSAGES.get(request.query_params.get("msg", ""), ""))
-
-    def cross_site(request: Request) -> bool:
-        """Refuse state-changing requests sent from another site (CSRF defence in depth,
-        alongside the SameSite=Lax cookie)."""
-        origin = request.headers.get("origin")
-        return origin is not None and urlsplit(origin).netloc != request.url.netloc
 
     def decide(ticket_id: str, request: Request, act):
         user = current_user(request)
