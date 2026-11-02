@@ -8,6 +8,7 @@ from datetime import timedelta
 from decline_desk.data.seed import BASE_TIME, seed
 from decline_desk.pii import mask_pii
 from decline_desk.repo import NotFound, Repo
+from decline_desk.rules.diagnose import Context, diagnose
 
 
 def main() -> None:
@@ -42,6 +43,28 @@ def main() -> None:
     raw = "Hola, mi tarjeta 4111 1111 1111 1111 fue rechazada. Escribanme a maria@andes.co o +57 300 123 4567. Pago 1500000 COP."
     print(f"  in : {raw}")
     print(f"  out: {mask_pii(raw)}")
+
+    print("\n== Diagnosis of every declined authorization (rules only, no LLM)")
+    for (emp_id,) in repo.conn.execute("SELECT id FROM employees ORDER BY id"):
+        window = repo.authorizations_for_employee(
+            emp_id, since=BASE_TIME - timedelta(days=14), until=BASE_TIME
+        )
+        for a in [x for x in window if x.is_declined]:
+            card = repo.card_for_employee(emp_id, a.card_id)
+            d = diagnose(
+                a,
+                Context(
+                    card=card,
+                    controls=repo.controls_for_card(card.id),
+                    company=repo.company(card.company_id),
+                    pending_topups=repo.pending_topups(card.company_id),
+                    recent_authorizations=window,
+                ),
+            )
+            flag = "ESCALATE" if d.escalate else "        "
+            causes = ", ".join(c.value for c in d.causes)
+            print(f"  {flag} {a.id:<20} code {a.response_code.value:<3} -> {causes}")
+            print(f"           {d.findings[0].evidence}")
 
 
 if __name__ == "__main__":
