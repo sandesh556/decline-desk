@@ -206,3 +206,31 @@ def test_failed_permission_attempts_are_audited_too(approvals):
     with pytest.raises(Forbidden):
         approvals.approve(pending.id, approver_id="emp_a")
     assert approvals.audit(pending.id)[-1].event == "denied"
+
+
+def test_stale_read_race_still_executes_once(repo, monkeypatch):
+    """Both approvers read 'pending' before either writes; only the atomic claim stops a
+    double execution."""
+    a = Approvals(repo, clock=lambda: NOW)
+    b = Approvals(repo, clock=lambda: NOW)
+    pending = submit(a)
+    stale = b.get(pending.id)  # b reads before a approves
+    a.approve(pending.id, approver_id="admin_1")
+
+    real_get = b.get
+    calls = iter([stale])
+    monkeypatch.setattr(b, "get", lambda action_id: next(calls, None) or real_get(action_id))
+    result = b.approve(pending.id, approver_id="admin_1")
+
+    assert result.status is ApprovalStatus.EXECUTED
+    assert len(overrides(repo)) == 1
+    executed_events = [e for e in a.audit(pending.id) if e.event == "executed"]
+    assert len(executed_events) == 1
+
+
+def test_action_payload_round_trips_exactly(approvals):
+    action = TempLimitIncrease(card_id="card_a", new_per_txn_limit_usd=Decimal("350.50"), hours=6)
+    pending = approvals.submit(
+        action, ticket_id="t_9", employee_id="emp_a", diagnosis=dx(Cause.LIMIT_PER_TXN)
+    )
+    assert approvals.get(pending.id).action == action
