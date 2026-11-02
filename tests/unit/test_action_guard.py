@@ -277,3 +277,78 @@ def test_unknown_card_gives_the_same_message_as_someone_elses(repo):
             dx(Cause.COUNTRY_RESTRICTED),
             repo,
         )
+
+
+# --- the fix must target the declined transaction itself ---------------------------------
+
+
+def declined(country="MX", mcc="5813"):
+    from datetime import UTC, datetime
+
+    from decline_desk.domain.models import Authorization
+
+    return Authorization(
+        id="auth_1",
+        card_id="card_a",
+        amount=Decimal("50"),
+        currency="USD",
+        usd_per_unit=Decimal("1"),
+        merchant_name="Bar",
+        mcc=mcc,
+        country=country,
+        response_code="57",
+        created_at=datetime(2026, 10, 28, tzinfo=UTC),
+    )
+
+
+def test_unblocking_a_different_blocked_category_is_rejected(repo):
+    repo.conn.execute(
+        "UPDATE card_controls SET blocked_mccs = '[\"5813\", \"7995\"]' WHERE card_id = 'card_a'"
+    )
+    with pytest.raises(PolicyViolation, match="declined transaction"):
+        check_action(
+            UnblockMcc(card_id="card_a", mcc="7995", hours=24),
+            employee_id="emp_a",
+            diagnosis=dx(Cause.MCC_BLOCKED),
+            repo=repo,
+            authorization=declined(),
+        )
+
+
+def test_allowing_a_different_country_than_the_purchase_is_rejected(repo):
+    with pytest.raises(PolicyViolation, match="declined transaction"):
+        check_action(
+            AllowCountry(card_id="card_a", country="US", hours=24),
+            employee_id="emp_a",
+            diagnosis=dx(Cause.COUNTRY_RESTRICTED),
+            repo=repo,
+            authorization=declined(country="MX"),
+        )
+
+
+def test_action_on_a_different_card_than_the_declined_one_is_rejected(repo):
+    with pytest.raises(PolicyViolation, match="declined transaction"):
+        check_action(
+            UnfreezeCard(card_id="card_frozen"),
+            employee_id="emp_a",
+            diagnosis=dx(Cause.CARD_FROZEN_BY_USER),
+            repo=repo,
+            authorization=declined(),
+        )  # declined on card_a, not card_frozen
+
+
+def test_matching_country_and_category_pass(repo):
+    check_action(
+        AllowCountry(card_id="card_a", country="MX", hours=24),
+        employee_id="emp_a",
+        diagnosis=dx(Cause.COUNTRY_RESTRICTED),
+        repo=repo,
+        authorization=declined(country="MX"),
+    )
+    check_action(
+        UnblockMcc(card_id="card_a", mcc="5813", hours=24),
+        employee_id="emp_a",
+        diagnosis=dx(Cause.MCC_BLOCKED),
+        repo=repo,
+        authorization=declined(),
+    )
