@@ -123,3 +123,21 @@ def test_triage_sends_any_provider_failure_to_a_human(error):
         sleep=lambda s: None,
     )
     assert result.intent is Intent.NEEDS_HUMAN
+
+
+def test_env_example_documents_every_provider_and_holds_no_values():
+    from pathlib import Path
+
+    text = (Path(__file__).resolve().parents[2] / ".env.example").read_text()
+    for var in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "LLM_PROVIDER"):
+        assert var in text
+    for line in text.splitlines():
+        if line.endswith("_API_KEY="):
+            continue
+        assert "_API_KEY=" not in line or line.startswith("#"), line
+
+
+def test_empty_model_overrides_in_env_fall_back_to_defaults(monkeypatch):
+    monkeypatch.setenv("TRIAGE_MODEL", "")
+    monkeypatch.setenv("RESOLVER_MODEL", "")
+    assert make(llm_provider="gemini").models() == ("gemini-3.5-flash-lite", "gemini-3.8-flash")
