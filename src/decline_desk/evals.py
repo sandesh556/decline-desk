@@ -329,8 +329,9 @@ def percentile(values: list[int], pct: int) -> int:
     return ordered[max(0, math.ceil(pct / 100 * len(ordered)) - 1)]
 
 
-def _rate(flags: list[bool]) -> float:
-    return sum(flags) / len(flags) if flags else 1.0
+def _rate(flags: list[bool]) -> float | None:
+    """Share of True values, or None when there was nothing to measure."""
+    return sum(flags) / len(flags) if flags else None
 
 
 def score(results: list[CaseResult]) -> dict:
@@ -382,7 +383,10 @@ def render_markdown(columns: dict[str, dict], title: str) -> str:
         cells = []
         for name in names:
             v = columns[name][key]
-            cells.append(f"{v:.0%}" if kind == "pct" else f"${v}" if kind == "usd" else str(v))
+            if v is None:
+                cells.append("n/a")
+            else:
+                cells.append(f"{v:.0%}" if kind == "pct" else f"${v}" if kind == "usd" else str(v))
         lines.append(f"| {label} | " + " | ".join(cells) + " |")
     return "\n".join(lines) + "\n"
 
