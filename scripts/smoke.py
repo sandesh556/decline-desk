@@ -7,6 +7,8 @@ from datetime import timedelta
 
 from decline_desk.data.seed import BASE_TIME, seed
 from decline_desk.pii import mask_pii
+from decline_desk.policy.actions import PolicyViolation, check_action, parse_action
+from decline_desk.policy.approvals import Approvals, Forbidden
 from decline_desk.repo import NotFound, Repo
 from decline_desk.rules.diagnose import Context, diagnose
 
@@ -65,6 +67,69 @@ def main() -> None:
             causes = ", ".join(c.value for c in d.causes)
             print(f"  {flag} {a.id:<20} code {a.response_code.value:<3} -> {causes}")
             print(f"           {d.findings[0].evidence}")
+
+    print("\n== Action guard + approvals on Maria's Uber decline in Mexico")
+    window = repo.authorizations_for_employee(
+        "emp_maria", since=BASE_TIME - timedelta(days=14), until=BASE_TIME
+    )
+    [uber] = [a for a in window if a.id == "scn_maria_uber_mx"]
+    card = repo.card_for_employee("emp_maria", uber.card_id)
+    dx = diagnose(
+        uber,
+        Context(
+            card=card,
+            controls=repo.controls_for_card(card.id),
+            company=repo.company(card.company_id),
+            recent_authorizations=window,
+        ),
+    )
+    proposals = {
+        "injected: raise limit to 50000": {
+            "type": "temp_limit_increase",
+            "card_id": card.id,
+            "new_per_txn_limit_usd": "50000",
+            "hours": 24,
+        },
+        "invented action type": {"type": "transfer_funds", "card_id": card.id},
+        "someone else's card": {
+            "type": "allow_country",
+            "card_id": "card_carlos",
+            "country": "MX",
+            "hours": 24,
+        },
+        "legit: allow MX for 24h": {
+            "type": "allow_country",
+            "card_id": card.id,
+            "country": "MX",
+            "hours": 24,
+        },
+    }
+    approvals = Approvals(repo, clock=lambda: BASE_TIME)
+    for label, raw in proposals.items():
+        try:
+            action = check_action(
+                parse_action(raw), employee_id="emp_maria", diagnosis=dx, repo=repo
+            )
+        except PolicyViolation as exc:
+            print(f"  REFUSED  {label:<32} {exc}")
+            continue
+        pending = approvals.submit(
+            action, ticket_id="t_demo", employee_id="emp_maria", diagnosis=dx
+        )
+        print(f"  accepted {label:<32} -> {pending.status.value}")
+        try:
+            approvals.approve(pending.id, approver_id="emp_maria")
+        except Forbidden:
+            print("           Maria tries to approve her own request -> Forbidden")
+        approvals.approve(pending.id, approver_id="emp_laura")
+        approvals.approve(pending.id, approver_id="emp_laura")  # double click
+        print(
+            f"           Laura (admin) approves twice -> {approvals.get(pending.id).status.value}"
+        )
+        n = repo.conn.execute("SELECT COUNT(*) FROM control_overrides").fetchone()[0]
+        print(f"           overrides written: {n}")
+        for e in approvals.audit(pending.id):
+            print(f"           audit: {e.event:<9} by {e.actor}")
 
 
 if __name__ == "__main__":
