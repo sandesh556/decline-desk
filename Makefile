@@ -1,8 +1,12 @@
-.PHONY: setup test lint fmt hooks smoke check demo e2e
+.PHONY: setup browsers test lint fmt hooks smoke check demo e2e eval eval-live
 
-setup:            ## install deps and git hooks
+setup:            ## install deps, the test browser and git hooks
 	uv sync
+	$(MAKE) browsers
 	$(MAKE) hooks
+
+browsers:         ## download the headless Chromium used by the browser tests
+	uv run playwright install chromium
 
 test:             ## run the test suite with coverage (browser tests excluded)
 	uv run pytest --ignore=tests/e2e --cov --cov-report=term-missing
@@ -29,3 +33,9 @@ smoke:            ## end-to-end run on seeded data (the "vibe test")
 	uv run python scripts/smoke.py
 
 check: lint test smoke e2e  ## everything that must pass before a phase tag
+
+eval:             ## score the 40 gold tickets (scripted model, no key needed)
+	uv run python -m decline_desk.evals --mode rules
+
+eval-live:        ## same tickets with your provider + the LLM-only baseline (needs a key)
+	uv run python -m decline_desk.evals --mode live --baseline --pause 4
