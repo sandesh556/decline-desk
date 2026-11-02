@@ -80,28 +80,34 @@ class TicketStore:
                 (ticket.id, json.dumps(resolution_view(resolution), ensure_ascii=False)),
             )
 
-    def list_for_company(self, company_id: str) -> list[StoredTicket]:
+    def list_for_company(
+        self, company_id: str, employee_id: str | None = None
+    ) -> list[StoredTicket]:
+        """All of a company's tickets, or only one employee's when employee_id is given."""
         rows = self.conn.execute(
             """
             SELECT t.*, e.name AS employee_name, r.data FROM tickets t
             JOIN employees e ON e.id = t.employee_id
             JOIN resolutions r ON r.ticket_id = t.id
-            WHERE t.company_id = ? ORDER BY t.created_at DESC, t.id DESC
+            WHERE t.company_id = ? AND (? IS NULL OR t.employee_id = ?)
+            ORDER BY t.created_at DESC, t.id DESC
             """,
-            (company_id,),
+            (company_id, employee_id, employee_id),
         ).fetchall()
         return [self._row(r) for r in rows]
 
-    def get(self, ticket_id: str, company_id: str) -> StoredTicket | None:
-        """Only within the caller's company: another company's ticket looks like a 404."""
+    def get(
+        self, ticket_id: str, company_id: str, employee_id: str | None = None
+    ) -> StoredTicket | None:
+        """Only within the caller's scope: anything outside it looks like a missing ticket."""
         row = self.conn.execute(
             """
             SELECT t.*, e.name AS employee_name, r.data FROM tickets t
             JOIN employees e ON e.id = t.employee_id
             JOIN resolutions r ON r.ticket_id = t.id
-            WHERE t.id = ? AND t.company_id = ?
+            WHERE t.id = ? AND t.company_id = ? AND (? IS NULL OR t.employee_id = ?)
             """,
-            (ticket_id, company_id),
+            (ticket_id, company_id, employee_id, employee_id),
         ).fetchone()
         return self._row(row) if row else None
 

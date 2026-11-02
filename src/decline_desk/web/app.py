@@ -97,6 +97,10 @@ def create_app(svc: Services) -> FastAPI:
         except NotFound:
             return None
 
+    def visible(user: Employee, ticket_id: str) -> StoredTicket | None:
+        """Admins see their whole company; everyone else sees only their own tickets."""
+        return svc.store.get(ticket_id, user.company_id, None if user.is_admin else user.id)
+
     def status_label(t: StoredTicket) -> tuple[str, bool]:
         pending_id = t.view.get("pending_action_id")
         if pending_id:
@@ -119,7 +123,7 @@ def create_app(svc: Services) -> FastAPI:
         company = svc.repo.company(user.company_id)
         tz = ZoneInfo(company.timezone)
         rows = []
-        for t in svc.store.list_for_company(company.id):
+        for t in svc.store.list_for_company(company.id, None if user.is_admin else user.id):
             label, attention = status_label(t)
             received = t.ticket.created_at.astimezone(tz).strftime("%d %b %H:%M")
             rows.append(Row(t.ticket, t.employee_name, label, attention, received))
@@ -180,7 +184,7 @@ def create_app(svc: Services) -> FastAPI:
         user = current_user(request)
         if user is None:
             return login_page()
-        t = svc.store.get(ticket_id, user.company_id)
+        t = visible(user, ticket_id)
         if t is None:
             return not_found(user)
         return ticket_page(user, t, message=MESSAGES.get(request.query_params.get("msg", ""), ""))
@@ -197,7 +201,7 @@ def create_app(svc: Services) -> FastAPI:
             return RedirectResponse("/", status_code=303)
         if cross_site(request):
             return HTMLResponse("Cross-site request refused.", status_code=403)
-        t = svc.store.get(ticket_id, user.company_id)
+        t = visible(user, ticket_id)
         if t is None:
             return not_found(user)
         pending_id = t.view.get("pending_action_id")
@@ -236,7 +240,7 @@ def create_app(svc: Services) -> FastAPI:
         user = current_user(request)
         if user is None:
             return JSONResponse({"error": "sign in required"}, status_code=401)
-        t = svc.store.get(ticket_id, user.company_id)
+        t = visible(user, ticket_id)
         if t is None:
             return JSONResponse({"error": "not found"}, status_code=404)
         pending_id = t.view.get("pending_action_id")
