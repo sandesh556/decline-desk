@@ -5,7 +5,15 @@ from decimal import Decimal
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
 
 
 class Currency(StrEnum):
@@ -39,6 +47,8 @@ def _utc(value: datetime) -> datetime:
 
 UtcDatetime = Annotated[datetime, AfterValidator(_utc)]
 PositiveMoney = Annotated[Decimal, Field(gt=0)]
+Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+Mcc = Annotated[str, Field(pattern=r"^\d{4}$")]
 
 
 class Frozen(BaseModel):
@@ -46,14 +56,14 @@ class Frozen(BaseModel):
 
 
 class Authorization(Frozen):
-    id: str
-    card_id: str
+    id: Text
+    card_id: Text
     created_at: UtcDatetime
     amount: PositiveMoney
     currency: Currency
     usd_per_unit: PositiveMoney  # FX rate captured at authorization time
-    merchant_name: str
-    mcc: str = Field(pattern=r"^\d{4}$")
+    merchant_name: Text
+    mcc: Mcc
     country: str = Field(pattern=r"^[A-Z]{2}$")
     response_code: ResponseCode
 
@@ -88,30 +98,34 @@ NonNegativeMoney = Annotated[Decimal, Field(ge=0)]
 
 
 class Company(Frozen):
-    id: str
-    name: str
+    id: Text
+    name: Text
     timezone: Annotated[str, AfterValidator(_iana_timezone)]  # defines the "day" for limits
     wallet_balance_usd: NonNegativeMoney  # settled stablecoin balance backing the cards
     limit_cap_usd: PositiveMoney  # most an admin may raise any card limit to
 
 
 class Employee(Frozen):
-    id: str
-    company_id: str
-    name: str
+    id: Text
+    company_id: Text
+    name: Text
     language: Literal["es", "pt", "en"]
     is_admin: bool = False
 
 
 def _country_codes(values: frozenset[str]) -> frozenset[str]:
-    return frozenset(v.upper() for v in values)
+    codes = frozenset(v.strip().upper() for v in values)
+    bad = sorted(c for c in codes if len(c) != 2 or not c.isalpha() or not c.isascii())
+    if bad:
+        raise ValueError(f"country codes must be ISO alpha-2: {bad}")
+    return codes
 
 
 class CardControls(Frozen):
-    card_id: str
+    card_id: Text
     per_txn_limit_usd: PositiveMoney
     daily_limit_usd: PositiveMoney
-    blocked_mccs: frozenset[str]
+    blocked_mccs: frozenset[Mcc]
     allowed_countries: Annotated[frozenset[str], AfterValidator(_country_codes)]
 
     @model_validator(mode="after")
@@ -122,10 +136,10 @@ class CardControls(Frozen):
 
 
 class PendingTopup(Frozen):
-    id: str
-    company_id: str
+    id: Text
+    company_id: Text
     amount_usd: PositiveMoney
-    asset: str  # e.g. USDC
+    asset: Text  # e.g. USDC
     eta: UtcDatetime  # expected on-chain settlement time
 
 
@@ -136,9 +150,9 @@ class CardStatus(StrEnum):
 
 
 class Card(Frozen):
-    id: str
-    employee_id: str
-    company_id: str
+    id: Text
+    employee_id: Text
+    company_id: Text
     last4: str = Field(pattern=r"^\d{4}$")  # never store the full PAN
     status: CardStatus
     expires: date
