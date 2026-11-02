@@ -6,7 +6,9 @@ handles only the fuzzy parts: which transaction the person means, and wording th
 """
 
 from dataclasses import dataclass, field
+from decimal import Decimal
 from enum import StrEnum
+from zoneinfo import ZoneInfo
 
 from decline_desk.domain.models import (
     Authorization,
@@ -92,17 +94,9 @@ def _primary(auth: Authorization, ctx: Context) -> Finding:
         case ResponseCode.NOT_PERMITTED:
             return Finding(Cause.MCC_BLOCKED, f"{card_ref} blocks merchant category {auth.mcc}")
         case ResponseCode.LIMIT_EXCEEDED:
-            return Finding(
-                Cause.LIMIT_PER_TXN,
-                f"${auth.amount_usd} is above the ${controls.per_txn_limit_usd} "
-                f"per-transaction limit on {card_ref}",
-            )
+            return _limit(auth, ctx, card_ref)
         case ResponseCode.INSUFFICIENT_FUNDS:
-            return Finding(
-                Cause.COMPANY_FUNDS_LOW,
-                f"company wallet holds ${ctx.company.wallet_balance_usd}; "
-                f"the purchase needed ${auth.amount_usd}",
-            )
+            return _funds(auth, ctx)
         case ResponseCode.SUSPECTED_FRAUD:
             return Finding(Cause.SUSPECTED_FRAUD, f"the network flagged {card_ref} for review")
         case ResponseCode.CARD_BLOCKED if card.status is CardStatus.FROZEN_FRAUD:
@@ -121,3 +115,63 @@ def _primary(auth: Authorization, ctx: Context) -> Finding:
             )
         case _:
             return Finding(Cause.UNKNOWN, f"unrecognised decline code on {card_ref}")
+
+
+def _inconsistent(code: ResponseCode, why: str) -> Finding:
+    return Finding(Cause.INCONSISTENT, f"code {code.value} does not match the data: {why}")
+
+
+def _limit(auth: Authorization, ctx: Context, card_ref: str) -> Finding:
+    amount, controls = auth.amount_usd, ctx.controls
+    if amount > controls.per_txn_limit_usd:  # exactly at the limit is allowed
+        return Finding(
+            Cause.LIMIT_PER_TXN,
+            f"${amount} is above the ${controls.per_txn_limit_usd} "
+            f"per-transaction limit on {card_ref}",
+        )
+    day_total = _spent_same_local_day(auth, ctx) + amount
+    if day_total > controls.daily_limit_usd:
+        local_day = auth.created_at.astimezone(ZoneInfo(ctx.company.timezone)).date()
+        return Finding(
+            Cause.LIMIT_DAILY,
+            f"${day_total} spent on {local_day} ({ctx.company.timezone}) would exceed the "
+            f"${controls.daily_limit_usd} daily limit on {card_ref}",
+        )
+    return _inconsistent(
+        auth.response_code,
+        f"${amount} is within the per-transaction limit and ${day_total} within the daily limit",
+    )
+
+
+def _spent_same_local_day(auth: Authorization, ctx: Context) -> Decimal:
+    """Approved spend earlier the same calendar day in the company's timezone."""
+    tz = ZoneInfo(ctx.company.timezone)
+    day = auth.created_at.astimezone(tz).date()
+    return sum(
+        (
+            a.amount_usd
+            for a in ctx.recent_authorizations
+            if a.card_id == auth.card_id
+            and not a.is_declined
+            and a.created_at < auth.created_at
+            and a.created_at.astimezone(tz).date() == day
+        ),
+        Decimal("0"),
+    )
+
+
+def _funds(auth: Authorization, ctx: Context) -> Finding:
+    wallet, amount = ctx.company.wallet_balance_usd, auth.amount_usd
+    if wallet >= amount:
+        return _inconsistent(auth.response_code, f"wallet holds ${wallet}, enough for ${amount}")
+    if ctx.pending_topups:
+        first = min(ctx.pending_topups, key=lambda t: t.eta)
+        return Finding(
+            Cause.FUNDS_PENDING_SETTLEMENT,
+            f"company wallet holds ${wallet}, below the ${amount} needed; a ${first.amount_usd} "
+            f"{first.asset} top-up is settling, expected {first.eta:%Y-%m-%d %H:%M} UTC",
+        )
+    return Finding(
+        Cause.COMPANY_FUNDS_LOW,
+        f"company wallet holds ${wallet}; the purchase needed ${amount} and no top-up is pending",
+    )
