@@ -22,10 +22,13 @@ from decline_desk.domain.models import (
 
 
 class Cause(StrEnum):
+    """Declaration order is fix-first priority: card usability, then where it may be used,
+    then how much, then funds, then retryable checkout errors."""
+
     CARD_FROZEN_FRAUD = "card_frozen_fraud"
     SUSPECTED_FRAUD = "suspected_fraud"
+    CARD_EXPIRED = "card_expired"  # before user-frozen: unfreezing an expired card is pointless
     CARD_FROZEN_BY_USER = "card_frozen_by_user"
-    CARD_EXPIRED = "card_expired"
     COUNTRY_RESTRICTED = "country_restricted"
     MCC_BLOCKED = "mcc_blocked"
     LIMIT_PER_TXN = "limit_per_txn"
@@ -77,20 +80,75 @@ def diagnose(auth: Authorization, ctx: Context) -> Diagnosis:
         raise ValueError(f"card {ctx.card.id} does not match authorization card {auth.card_id}")
     if not auth.is_declined:
         return Diagnosis(auth.id, approved=True)
-    return Diagnosis(auth.id, approved=False, findings=(_primary(auth, ctx),))
+
+    findings = [_primary(auth, ctx)]
+    if findings[0].cause is not Cause.UNKNOWN:  # never pile guesses onto an unknown code
+        findings += _control_violations(auth, ctx)
+
+    unique: dict[Cause, Finding] = {}
+    for f in findings:
+        unique.setdefault(f.cause, f)
+    order = list(Cause)
+    ranked = sorted(unique.values(), key=lambda f: order.index(f.cause))
+    return Diagnosis(auth.id, approved=False, findings=tuple(ranked))
+
+
+def _card_ref(card: Card) -> str:
+    return f"card ending {card.last4}"
+
+
+def _expired(auth: Authorization, ctx: Context) -> bool:
+    """A card is valid through its expiry date, in the company's local time."""
+    local_day = auth.created_at.astimezone(ZoneInfo(ctx.company.timezone)).date()
+    return local_day > ctx.card.expires
+
+
+def _control_violations(auth: Authorization, ctx: Context) -> list[Finding]:
+    """Every control the transaction breaks, whatever code the network sent."""
+    card, controls, ref = ctx.card, ctx.controls, _card_ref(ctx.card)
+    out: list[Finding] = []
+    if _expired(auth, ctx):
+        out.append(Finding(Cause.CARD_EXPIRED, f"{ref} expired on {card.expires}"))
+    if card.status is CardStatus.FROZEN_FRAUD:
+        out.append(Finding(Cause.CARD_FROZEN_FRAUD, f"{ref} is frozen for security review"))
+    if card.status is CardStatus.FROZEN_BY_USER:
+        out.append(Finding(Cause.CARD_FROZEN_BY_USER, f"{ref} was frozen by its holder"))
+    if auth.country not in controls.allowed_countries:
+        allowed = ", ".join(sorted(controls.allowed_countries))
+        out.append(
+            Finding(
+                Cause.COUNTRY_RESTRICTED,
+                f"{ref} is allowed in {allowed}; the purchase was in {auth.country}",
+            )
+        )
+    if auth.mcc in controls.blocked_mccs:
+        out.append(Finding(Cause.MCC_BLOCKED, f"{ref} blocks merchant category {auth.mcc}"))
+    if auth.amount_usd > controls.per_txn_limit_usd:
+        out.append(
+            Finding(
+                Cause.LIMIT_PER_TXN,
+                f"${auth.amount_usd} is above the ${controls.per_txn_limit_usd} "
+                f"per-transaction limit on {ref}",
+            )
+        )
+    return out
 
 
 def _primary(auth: Authorization, ctx: Context) -> Finding:
     card, controls, code = ctx.card, ctx.controls, auth.response_code
-    card_ref = f"card ending {card.last4}"
+    card_ref = _card_ref(card)
 
     match code:
+        case ResponseCode.RESTRICTED_CARD if auth.country in controls.allowed_countries:
+            return _inconsistent(code, f"{auth.country} is an allowed country")
         case ResponseCode.RESTRICTED_CARD:
             allowed = ", ".join(sorted(controls.allowed_countries))
             return Finding(
                 Cause.COUNTRY_RESTRICTED,
                 f"{card_ref} is allowed in {allowed}; the purchase was in {auth.country}",
             )
+        case ResponseCode.NOT_PERMITTED if auth.mcc not in controls.blocked_mccs:
+            return _inconsistent(code, f"merchant category {auth.mcc} is not blocked")
         case ResponseCode.NOT_PERMITTED:
             return Finding(Cause.MCC_BLOCKED, f"{card_ref} blocks merchant category {auth.mcc}")
         case ResponseCode.LIMIT_EXCEEDED:
@@ -101,10 +159,14 @@ def _primary(auth: Authorization, ctx: Context) -> Finding:
             return Finding(Cause.SUSPECTED_FRAUD, f"the network flagged {card_ref} for review")
         case ResponseCode.CARD_BLOCKED if card.status is CardStatus.FROZEN_FRAUD:
             return Finding(Cause.CARD_FROZEN_FRAUD, f"{card_ref} is frozen for security review")
-        case ResponseCode.CARD_BLOCKED:
+        case ResponseCode.CARD_BLOCKED if card.status is CardStatus.FROZEN_BY_USER:
             return Finding(Cause.CARD_FROZEN_BY_USER, f"{card_ref} was frozen by its holder")
-        case ResponseCode.EXPIRED_CARD:
+        case ResponseCode.CARD_BLOCKED:
+            return _inconsistent(code, f"{card_ref} is active")
+        case ResponseCode.EXPIRED_CARD if _expired(auth, ctx):
             return Finding(Cause.CARD_EXPIRED, f"{card_ref} expired on {card.expires}")
+        case ResponseCode.EXPIRED_CARD:
+            return _inconsistent(code, f"{card_ref} is valid until {card.expires}")
         case ResponseCode.AUTH_REQUIRED:
             return Finding(
                 Cause.THREE_DS_FAILED, f"3-D Secure verification was not completed on {card_ref}"
