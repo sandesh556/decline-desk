@@ -44,7 +44,8 @@
   .notice { padding: 10px 12px; border: 1px solid var(--line); border-left: 3px solid
             var(--accent); background: var(--panel); margin-bottom: 16px; }
   .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
-  @media (max-width: 640px) { th:nth-child(4), td:nth-child(4) { display: none; } }
+  .scroll { overflow-x: auto; }
+  td, .text { overflow-wrap: anywhere; }
 </style>
 </head>
 <body>

@@ -3,7 +3,7 @@
 {% block content %}
 <h1>Decline tickets <span class="muted">- {{ company.name }}</span></h1>
 {% if rows %}
-<table>
+<div class="scroll"><table>
   <thead><tr><th>Ticket</th><th>Employee</th><th>Status</th><th>Received</th></tr></thead>
   <tbody>
   {% for r in rows %}
@@ -15,7 +15,7 @@
   </tr>
   {% endfor %}
   </tbody>
-</table>
+</table></div>
 {% else %}
 <div class="panel muted">No tickets yet.</div>
 {% endif %}

@@ -44,16 +44,16 @@
   <p class="muted">Waiting for a company admin to approve.</p>
   {% endif %}
   {% if audit %}
-  <table style="margin-top:12px">
+  <div class="scroll"><table style="margin-top:12px">
     <thead><tr><th>Event</th><th>By</th><th>Detail</th></tr></thead>
     <tbody>{% for e in audit %}<tr><td>{{ e.event }}</td><td>{{ e.actor }}</td><td class="muted">{{ e.detail }}</td></tr>{% endfor %}</tbody>
-  </table>
+  </table></div>
   {% endif %}
 </div>
 {% endif %}
 
 <h2>Trace</h2>
-<table>
+<div class="scroll"><table>
   <thead><tr><th>Step</th><th>Model</th><th>Tokens in / out</th><th>Cost</th></tr></thead>
   <tbody>
   {% for s in t.view.trace %}
@@ -64,5 +64,5 @@
   {% endfor %}
   <tr><td colspan="3"><strong>Total</strong></td><td><strong>${{ t.view.cost_usd }}</strong></td></tr>
   </tbody>
-</table>
+</table></div>
 {% endblock %}
