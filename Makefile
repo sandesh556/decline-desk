@@ -1,4 +1,4 @@
-.PHONY: setup test lint fmt hooks
+.PHONY: setup test lint fmt hooks smoke check
 
 setup:            ## install deps and git hooks
 	uv sync
@@ -18,3 +18,8 @@ fmt:              ## auto-format
 hooks:            ## install the pre-commit secret scan
 	cp scripts/pre-commit .git/hooks/pre-commit
 	chmod +x .git/hooks/pre-commit
+
+smoke:            ## end-to-end run on seeded data (the "vibe test")
+	uv run python scripts/smoke.py
+
+check: lint test smoke  ## everything that must pass before a phase tag
