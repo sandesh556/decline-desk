@@ -25,7 +25,7 @@ class Settings(BaseSettings):
 
     llm_mode: LLMMode = LLMMode.FAKE
     anthropic_api_key: SecretStr | None = None
-    triage_model: str = "claude-haiku-4-5-20251001"
+    triage_model: str = "claude-haiku-4-5"
     resolver_model: str = "claude-sonnet-5-5"
     database_path: str = "declinedesk.sqlite3"
 
