@@ -79,3 +79,20 @@ def test_sign_out_clears_the_cookie(client):
     assert 'user=""' in resp.headers.get("set-cookie", "") or "Max-Age=0" in resp.headers.get(
         "set-cookie", ""
     )
+
+
+def test_employee_sees_only_their_own_tickets(client):
+    page = signed_in(client, "emp_maria").get("/").text
+    assert "Maria Gomez" in page and "Carlos Ruiz" not in page
+
+
+def test_employee_cannot_open_or_fetch_a_colleagues_ticket(client):
+    c = signed_in(client, "emp_maria")
+    assert c.get("/tickets/demo_2").status_code == 404
+    assert c.get("/api/tickets/demo_2").status_code == 404
+    assert c.get("/tickets/demo_1").status_code == 200  # her own
+
+
+def test_employee_with_several_tickets_sees_all_of_them(client):
+    page = signed_in(client, "emp_lucas").get("/").text
+    assert "demo_3" in page and "demo_4" in page
