@@ -124,3 +124,17 @@ def test_empty_reply_is_refused(text):
 
 def test_overlong_reply_is_refused():
     assert "too_long" in verify_reply("a" * 1501)
+
+
+@pytest.mark.parametrize("lang", LANGUAGES)
+def test_every_template_passes_the_checker_itself(lang):
+    values = {
+        "eta": "17:30",
+        "allowed": "CO",
+        "country": "MX",
+        "limit": "150",
+        "action": "allow MX for 24h",
+    }
+    for key in TEMPLATES[lang]:
+        text = TEMPLATES[lang][key].format_map(values)
+        assert verify_reply(text) == [], (lang, key)
