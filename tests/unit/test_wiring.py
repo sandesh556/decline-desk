@@ -98,14 +98,14 @@ def test_factory_refuses_live_mode_without_a_key():
 @pytest.mark.parametrize(
     ("model", "expected"),
     [
-        ("gpt-5-nano", "0.000085"),
-        ("gpt-5.1", "0.001650"),
-        ("gemini-3.5-flash-lite", "0.000550"),
-        ("gemini-3.8-flash", "0.001125"),
+        ("gpt-5-nano", "0.000130"),
+        ("gpt-5.1", "0.003250"),
+        ("gemini-3.5-flash-lite", "0.000800"),
+        ("gemini-3.8-flash", "0.001500"),
     ],
 )
 def test_new_models_are_priced(model, expected):
-    # 1000 input + 200 output tokens
+    # 1000 input + 200 output tokens, e.g. gemini-3.8-flash: 1000*0.75 + 200*3.75 per 1M
     assert cost_usd(Usage(model, 1000, 200, 1)) == Decimal(expected)
 
 
