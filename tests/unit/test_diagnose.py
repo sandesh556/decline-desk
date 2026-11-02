@@ -296,3 +296,77 @@ def test_a_cause_is_never_reported_twice():
 def test_unknown_code_does_not_pick_up_secondary_guesses():
     d = diagnose(make_auth("Q9", country="MX"), make_ctx(countries=("CO",)))
     assert d.causes == (Cause.UNKNOWN,)
+
+
+# --- more edge cases ------------------------------------------------------------------------
+
+
+def test_spend_on_another_card_does_not_count_toward_this_cards_daily_limit():
+    other_card = [
+        make_auth("00", amount="450", when=T - timedelta(hours=1), card_id="card_2", id_="other")
+    ]
+    d = diagnose(make_auth("61", amount="100"), make_ctx(day_auths=other_card))
+    assert d.causes[0] is Cause.INCONSISTENT
+
+
+def test_daily_total_sums_mixed_currencies_in_usd():
+    earlier = [
+        make_auth(
+            "00",
+            amount="1200000",
+            currency="COP",
+            rate="0.00025",
+            when=T - timedelta(hours=3),
+            id_="cop",
+        ),  # $300
+        make_auth(
+            "00",
+            amount="1000",
+            currency="MXN",
+            rate="0.055",
+            when=T - timedelta(hours=2),
+            id_="mxn",
+        ),  # $55
+    ]
+    d = diagnose(make_auth("61", amount="150"), make_ctx(day_auths=earlier))
+    assert d.causes == (Cause.LIMIT_DAILY,)
+    assert "$505.00" in d.findings[0].evidence
+
+
+def test_overdue_topup_is_still_reported_as_pending_not_as_low_funds():
+    late = PendingTopup(
+        id="tp",
+        company_id="co_1",
+        amount_usd=Decimal("500"),
+        asset="USDC",
+        eta=T - timedelta(hours=1),
+    )
+    d = diagnose(make_auth("51", amount="120"), make_ctx(wallet="60", topups=[late]))
+    assert d.causes == (Cause.FUNDS_PENDING_SETTLEMENT,)
+
+
+def test_wallet_exactly_equal_to_amount_is_enough():
+    d = diagnose(make_auth("51", amount="120"), make_ctx(wallet="120"))
+    assert d.causes[0] is Cause.INCONSISTENT
+
+
+def test_escalates_if_any_cause_needs_a_human():
+    d = diagnose(make_auth("59", country="MX"), make_ctx(countries=("CO",)))
+    assert d.causes == (Cause.SUSPECTED_FRAUD, Cause.COUNTRY_RESTRICTED)
+    assert d.escalate is True
+
+
+def test_sao_paulo_company_uses_its_own_local_day():
+    ctx = make_ctx()
+    sp = Context(
+        card=ctx.card,
+        controls=ctx.controls,
+        company=ctx.company.model_copy(update={"timezone": "America/Sao_Paulo"}),
+        recent_authorizations=[
+            make_auth(
+                "00", amount="450", id_="early", when=datetime(2026, 10, 28, 2, 30, tzinfo=UTC)
+            )
+        ],
+    )
+    # 02:30 UTC = 23:30 on Oct 27 in Sao Paulo (UTC-3): previous local day.
+    assert diagnose(make_auth("61", amount="100"), sp).causes[0] is Cause.INCONSISTENT
