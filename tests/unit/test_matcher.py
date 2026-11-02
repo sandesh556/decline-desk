@@ -181,3 +181,29 @@ def test_same_timestamp_candidates_have_a_stable_order():
     t = TICKET - timedelta(hours=1)
     result = run(Hints(merchant="Uber"), [auth("b", when=t), auth("a", when=t)])
     assert [a.id for a in result.candidates] == ["a", "b"]
+
+
+def test_local_currency_hint_is_compared_in_usd_using_a_rate_from_history():
+    """'1450 reais' must rule out an $89 USD charge. The rate comes from any of the
+    employee's own BRL authorizations, which each store the rate at authorization time."""
+    laptop = auth(
+        "laptop", merchant="Kabum", amount="1450", currency="BRL", rate="0.18", country="BR"
+    )  # $261
+    gift = auth(
+        "gift",
+        merchant="Gift Card Store",
+        amount="89",
+        currency="USD",
+        rate="1",
+        country="US",
+        code="59",
+    )
+    result = run(Hints(amount=Decimal("1450"), currency="BRL"), [laptop, gift])
+    assert result.status is MatchStatus.MATCH
+    assert result.authorization.id == "laptop"
+
+
+def test_without_any_rate_for_the_hint_currency_the_charge_is_not_ruled_out():
+    gift = auth("gift", amount="89", currency="USD", rate="1", country="US", code="59")
+    result = run(Hints(amount=Decimal("1450"), currency="BRL"), [gift])
+    assert result.authorization.id == "gift"
