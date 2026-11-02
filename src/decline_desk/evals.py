@@ -16,6 +16,7 @@ import argparse
 import json
 import math
 import sqlite3
+import time
 from dataclasses import dataclass
 from datetime import timedelta
 from decimal import Decimal
@@ -165,8 +166,20 @@ def run_case(
     )
 
 
+def _paced(items: list, pause: float, sleep):
+    for i, item in enumerate(items):
+        if i and pause:
+            sleep(pause)  # stay under the provider's requests-per-minute limit
+        yield item
+
+
 def run_dataset(
-    cases: list[EvalCase], *, mode: str = "rules", settings: Settings | None = None
+    cases: list[EvalCase],
+    *,
+    mode: str = "rules",
+    settings: Settings | None = None,
+    pause: float = 0.0,
+    sleep=time.sleep,
 ) -> list[CaseResult]:
     if mode == "rules":
         return [
@@ -177,7 +190,7 @@ def run_dataset(
                 resolver_model="fake-draft",
                 measure_refusals=True,
             )
-            for c in cases
+            for c in _paced(cases, pause, sleep)
         ]
     settings = settings or Settings()
     client = make_client(settings)  # raises SettingsError without the provider's key
@@ -188,9 +201,9 @@ def run_dataset(
             client=client,
             triage_model=triage_model,
             resolver_model=resolver_model,
-            measure_refusals=False,
-        )  # a real model may simply not propose a bad action
-        for c in cases
+            measure_refusals=False,  # a real model may simply not propose a bad action
+        )
+        for c in _paced(cases, pause, sleep)
     ]
 
 
@@ -293,11 +306,16 @@ def _guard_ok(case: EvalCase, svc: Services, out: _BaselineOut) -> bool:
         return False
 
 
-def run_baseline(cases: list[EvalCase], settings: Settings | None = None) -> list[CaseResult]:
+def run_baseline(
+    cases: list[EvalCase],
+    settings: Settings | None = None,
+    pause: float = 0.0,
+    sleep=time.sleep,
+) -> list[CaseResult]:
     settings = settings or Settings()
     client = make_client(settings)
     _, model = settings.models()
-    return [run_baseline_case(c, client=client, model=model) for c in cases]
+    return [run_baseline_case(c, client=client, model=model) for c in _paced(cases, pause, sleep)]
 
 
 # --- scoring and report -----------------------------------------------------------------------
@@ -369,19 +387,29 @@ def render_markdown(columns: dict[str, dict], title: str) -> str:
     return "\n".join(lines) + "\n"
 
 
-def main(argv: list[str] | None = None) -> int:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--mode", choices=["rules", "live"], default=None)
     parser.add_argument("--baseline", action="store_true")
     parser.add_argument("--limit", type=int, default=None, help="only the first N cases")
-    args = parser.parse_args(argv)
+    parser.add_argument(
+        "--pause",
+        type=float,
+        default=0.0,
+        help="seconds between tickets (free tiers limit requests per minute)",
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
     settings = Settings()
     mode = args.mode or ("live" if settings.llm_mode.value == "live" else "rules")
     cases = load_dataset()[: args.limit]
 
-    columns = {"hybrid": score(run_dataset(cases, mode=mode, settings=settings))}
+    columns = {"hybrid": score(run_dataset(cases, mode=mode, settings=settings, pause=args.pause))}
     if args.baseline and mode == "live":
-        columns["LLM-only"] = score(run_baseline(cases, settings))
+        columns["LLM-only"] = score(run_baseline(cases, settings, pause=args.pause))
     title = (
         f"Rules mode ({len(cases)} tickets, scripted model)"
         if mode == "rules"

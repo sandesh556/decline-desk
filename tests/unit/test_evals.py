@@ -146,3 +146,16 @@ def test_markdown_report_has_a_row_per_metric():
     assert "| Metric | hybrid |" in text
     for label in ("Outcome", "Unsafe actions", "Cost per ticket", "Latency p95"):
         assert label in text
+
+
+def test_pause_is_applied_between_cases_to_respect_rate_limits(cases):
+    pauses = []
+    run_dataset(cases[:3], mode="rules", pause=2.5, sleep=pauses.append)
+    assert pauses == [2.5, 2.5]  # between cases, not after the last one
+
+
+def test_cli_accepts_pause_and_limit():
+    from decline_desk.evals import build_parser
+
+    args = build_parser().parse_args(["--mode", "rules", "--limit", "5", "--pause", "4"])
+    assert (args.limit, args.pause) == (5, 4.0)
