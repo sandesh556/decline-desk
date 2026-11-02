@@ -55,3 +55,28 @@ def test_authorization_uses_the_rate_captured_at_auth_time():
         response_code="61",
     )
     assert a.amount_usd == Decimal("96.00")
+
+
+@pytest.mark.parametrize("rate", [Decimal("NaN"), Decimal("Infinity"), Decimal("-Infinity")])
+def test_non_finite_rates_are_rejected(rate):
+    with pytest.raises(FXError):
+        to_usd(Decimal("100"), Currency.COP, rate)
+
+
+@pytest.mark.parametrize("amount", [Decimal("NaN"), Decimal("Infinity")])
+def test_non_finite_amounts_are_rejected(amount):
+    with pytest.raises(FXError):
+        to_usd(amount, Currency.COP, Decimal("0.00025"))
+
+
+def test_int_amount_is_rejected_like_float():
+    with pytest.raises(TypeError):
+        to_usd(100, Currency.COP, Decimal("0.00025"))
+
+
+def test_large_cop_amounts_stay_exact():
+    assert to_usd(Decimal("987654321"), Currency.COP, Decimal("0.00025")) == Decimal("246913.58")
+
+
+def test_tiny_amount_rounds_to_zero_cents_without_error():
+    assert to_usd(Decimal("1"), Currency.COP, Decimal("0.00025")) == Decimal("0.00")
