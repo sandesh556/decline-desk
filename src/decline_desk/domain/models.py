@@ -67,6 +67,12 @@ class Authorization(Frozen):
     def is_declined(self) -> bool:
         return self.response_code is not ResponseCode.APPROVED
 
+    @property
+    def amount_usd(self) -> Decimal:
+        from decline_desk.fx import to_usd  # local import: fx depends on this module
+
+        return to_usd(self.amount, self.currency, self.usd_per_unit)
+
 
 class CardStatus(StrEnum):
     ACTIVE = "active"
