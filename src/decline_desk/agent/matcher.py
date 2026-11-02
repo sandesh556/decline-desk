@@ -41,8 +41,7 @@ def match(
     tz = ZoneInfo(timezone)
     in_window = sorted(
         (a for a in authorizations if ticket_time - WINDOW <= a.created_at <= ticket_time),
-        key=lambda a: a.created_at,
-        reverse=True,
+        key=lambda a: (-a.created_at.timestamp(), a.id),  # newest first, ties by id
     )
     fitting = [a for a in in_window if _fits(a, hints, ticket_time, tz)]
     declines = [a for a in fitting if a.is_declined]
@@ -58,11 +57,12 @@ def match(
 
 
 def _has_any(h: Hints) -> bool:
-    return any(v is not None for v in (h.merchant, h.country, h.amount, h.days_ago))
+    merchant = _norm(h.merchant or "") or None  # letterless text is not a usable hint
+    return any(v is not None for v in (merchant, h.country, h.amount, h.days_ago))
 
 
 def _fits(a: Authorization, h: Hints, ticket_time: datetime, tz: ZoneInfo) -> bool:
-    if h.merchant and not _merchant_fits(h.merchant, a.merchant_name):
+    if _norm(h.merchant or "") and not _merchant_fits(h.merchant, a.merchant_name):
         return False
     if h.country and h.country != a.country:
         return False
