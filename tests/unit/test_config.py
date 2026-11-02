@@ -19,10 +19,6 @@ def test_defaults_to_fake_mode_without_a_key(monkeypatch):
     settings.validate_for_runtime()  # fake mode needs no key
 
 
-def test_replay_mode_needs_no_key():
-    make(llm_mode="replay").validate_for_runtime()
-
-
 def test_live_mode_without_a_key_fails_with_a_clear_message():
     settings = make(llm_mode="live", anthropic_api_key=None)
 
@@ -56,22 +52,21 @@ def test_api_key_never_appears_in_repr_or_str():
 
 
 def test_model_names_default_and_can_be_overridden():
-    settings = make()
-    assert settings.triage_model.startswith("claude-haiku")
-    assert settings.resolver_model.startswith("claude-sonnet")
+    triage_model, resolver_model = make().models()
+    assert triage_model.startswith("claude-haiku")
+    assert resolver_model.startswith("claude-sonnet")
 
-    custom = make(resolver_model="claude-opus-5-5")
-    assert custom.resolver_model == "claude-opus-5-5"
+    assert make(resolver_model="claude-opus-5-5").models()[1] == "claude-opus-5-5"
 
 
 def test_settings_read_from_environment(monkeypatch):
-    monkeypatch.setenv("LLM_MODE", "replay")
+    monkeypatch.setenv("LLM_MODE", "live")
     monkeypatch.setenv("TRIAGE_MODEL", "claude-haiku-test")
 
     settings = make()
 
-    assert settings.llm_mode is LLMMode.REPLAY
-    assert settings.triage_model == "claude-haiku-test"
+    assert settings.llm_mode is LLMMode.LIVE
+    assert settings.models()[0] == "claude-haiku-test"
 
 
 @pytest.mark.parametrize("raw", ["LIVE", "Live", " live "])

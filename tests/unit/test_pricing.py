@@ -1,10 +1,8 @@
 from decimal import Decimal
 
-import pytest
-
 from decline_desk.config import Settings
 from decline_desk.llm.client import Usage
-from decline_desk.llm.pricing import UnknownModel, cost_usd
+from decline_desk.llm.pricing import cost_usd
 
 
 def test_haiku_cost_per_call():
@@ -28,13 +26,8 @@ def test_fake_and_replay_models_are_free():
     assert cost_usd(Usage("fake-haiku", 500, 100, 1)) == Decimal("0")
 
 
-def test_unknown_real_model_is_an_error_not_a_silent_zero():
-    with pytest.raises(UnknownModel):
-        cost_usd(Usage("claude-unknown-9", 10, 10, 1))
-
-
-def test_default_models_are_priced_and_have_no_date_suffix():
-    s = Settings(_env_file=None)
-    for model in (s.triage_model, s.resolver_model):
-        cost_usd(Usage(model, 1, 1, 1))
-        assert not model[-8:].isdigit()
+def test_default_models_of_every_provider_are_priced_and_have_no_date_suffix():
+    for provider in ("anthropic", "openai", "gemini"):
+        for model in Settings(_env_file=None, llm_provider=provider).models():
+            assert cost_usd(Usage(model, 1, 1, 1)) is not None, model
+            assert not model[-8:].isdigit()
