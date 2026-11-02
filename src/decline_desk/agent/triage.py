@@ -15,7 +15,14 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from decline_desk.domain.models import Currency
-from decline_desk.llm.client import LLMBadOutput, LLMClient, LLMUnavailable, Usage, call_json
+from decline_desk.llm.client import (
+    LLMBadOutput,
+    LLMClient,
+    LLMError,
+    LLMUnavailable,
+    Usage,
+    call_json,
+)
 from decline_desk.pii import mask_pii
 
 MAX_TICKET_CHARS = 4000
@@ -101,6 +108,8 @@ def triage(
         return TriageResult(fallback_language, Intent.NEEDS_HUMAN, note="model unavailable")
     except LLMBadOutput:
         return TriageResult(fallback_language, Intent.NEEDS_HUMAN, note="model output invalid")
+    except LLMError as exc:  # bad key, refusal, bad request: a person takes it from here
+        return TriageResult(fallback_language, Intent.NEEDS_HUMAN, note=f"model error: {exc}")
 
     hints = Hints(**out.model_dump(include=set(Hints.model_fields)))
     return TriageResult(out.language, Intent(out.intent), hints, usages)

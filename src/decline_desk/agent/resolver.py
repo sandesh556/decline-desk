@@ -233,10 +233,21 @@ def resolve(
 def _steps(name: str, usages: list[Usage], note: str = "") -> list[TraceStep]:
     if not usages:
         return [TraceStep(name, note=note)]
-    return [
-        TraceStep(name, u.model, u.input_tokens, u.output_tokens, u.latency_ms, cost_usd(u), note)
-        for u in usages
-    ]
+    steps = []
+    for u in usages:
+        cost = cost_usd(u)
+        steps.append(
+            TraceStep(
+                name,
+                u.model,
+                u.input_tokens,
+                u.output_tokens,
+                u.latency_ms,
+                cost if cost is not None else Decimal("0"),
+                note if cost is not None else (note + " unpriced model").strip(),
+            )
+        )
+    return steps
 
 
 def _suggest_action(
