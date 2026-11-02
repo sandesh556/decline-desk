@@ -2,10 +2,14 @@
 phase tag, so you can see the system working on real seeded data, not just unit tests.
 """
 
+import json
 import sqlite3
 from datetime import timedelta
 
+from decline_desk.agent.matcher import match
+from decline_desk.agent.triage import triage
 from decline_desk.data.seed import BASE_TIME, seed
+from decline_desk.llm.client import Completion, FakeLLM, Usage
 from decline_desk.pii import mask_pii
 from decline_desk.policy.actions import PolicyViolation, check_action, parse_action
 from decline_desk.policy.approvals import Approvals, Forbidden
@@ -130,6 +134,38 @@ def main() -> None:
         print(f"           overrides written: {n}")
         for e in approvals.audit(pending.id):
             print(f"           audit: {e.event:<9} by {e.actor}")
+
+    print("\n== Ticket -> triage (scripted model) -> match -> diagnosis")
+    ticket = (
+        "Hola, mi tarjeta 4111 1111 1111 1111 fue rechazada ayer en un Uber en Ciudad de "
+        "Mexico, unos 320 pesos. Me pueden ayudar? maria@andes.co"
+    )
+    scripted = FakeLLM(
+        [
+            Completion(
+                json.dumps(
+                    {
+                        "language": "es",
+                        "intent": "card_decline",
+                        "merchant": "Uber",
+                        "country": "MX",
+                        "amount": "320",
+                        "currency": "MXN",
+                        "days_ago": 1,
+                    }
+                ),
+                Usage("fake-haiku", 310, 58, 1),
+            )
+        ]
+    )
+    t = triage(ticket, client=scripted, model="fake-haiku", fallback_language="es")
+    print(f"  model saw : {scripted.calls[0].user}")
+    print(f"  triage    : lang={t.language} intent={t.intent.value} hints={t.hints.model_dump()}")
+    history = repo.authorizations_for_employee(
+        "emp_maria", since=BASE_TIME - timedelta(days=14), until=BASE_TIME
+    )
+    m = match(t.hints, history, ticket_time=BASE_TIME, timezone="America/Bogota")
+    print(f"  match     : {m.status.value} -> {m.authorization.id if m.authorization else None}")
 
 
 if __name__ == "__main__":
