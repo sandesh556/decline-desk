@@ -35,6 +35,14 @@ class LLMTimeout(LLMError):
     pass
 
 
+class LLMProviderError(LLMError):
+    """Non-retryable provider failure (bad key, bad request, model not found)."""
+
+
+class LLMRefused(LLMError):
+    """The model declined to answer (e.g. a safety refusal)."""
+
+
 class LLMUnavailable(LLMError):
     """Transient failures persisted past the retry budget."""
 

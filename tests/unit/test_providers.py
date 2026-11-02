@@ -208,3 +208,11 @@ def test_error_messages_never_contain_the_api_key():
     with pytest.raises(LLMProviderError) as info:
         AnthropicClient(sdk=sdk).complete(model="claude-haiku-4-5", system="S", user="U")
     assert key not in str(info.value)
+
+
+def test_gemini_network_errors_from_either_http_stack_are_transient():
+    import httpx
+
+    sdk, _ = gemini_sdk(httpx.ConnectError("refused", request=httpx.Request("POST", "https://x")))
+    with pytest.raises(LLMTimeout):
+        GeminiClient(sdk=sdk).complete(model="gemini-3.8-flash", system="S", user="U")
