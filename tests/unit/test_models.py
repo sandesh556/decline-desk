@@ -205,3 +205,69 @@ def test_pending_topup_eta_must_be_timezone_aware():
             asset="USDC",
             eta=datetime(2026, 10, 28, 18, 0),
         )
+
+
+# --- edge cases ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("field", ["id", "card_id", "merchant_name"])
+def test_blank_identifiers_and_merchant_are_rejected(field):
+    with pytest.raises(ValidationError):
+        auth(**{field: "  "})
+
+
+def test_unexpected_fields_are_rejected():
+    with pytest.raises(ValidationError):
+        auth(cvv="123")
+
+
+def test_lowercase_or_padded_codes_are_unknown_not_guessed():
+    assert auth(response_code="n7").response_code is ResponseCode.UNKNOWN
+    assert auth(response_code=" 51").response_code is ResponseCode.UNKNOWN
+
+
+def test_daily_limit_equal_to_per_txn_is_allowed():
+    from decline_desk.domain.models import CardControls
+
+    CardControls(
+        card_id="c",
+        per_txn_limit_usd=Decimal("500"),
+        daily_limit_usd=Decimal("500"),
+        blocked_mccs=set(),
+        allowed_countries={"CO"},
+    )
+
+
+@pytest.mark.parametrize("mccs", [{"799"}, {"79955"}, {"abcd"}])
+def test_blocked_mccs_must_be_four_digit_codes(mccs):
+    from decline_desk.domain.models import CardControls
+
+    with pytest.raises(ValidationError):
+        CardControls(
+            card_id="c",
+            per_txn_limit_usd=Decimal("1"),
+            daily_limit_usd=Decimal("1"),
+            blocked_mccs=mccs,
+            allowed_countries={"CO"},
+        )
+
+
+@pytest.mark.parametrize("countries", [{"COL"}, {"C"}, {"1A"}])
+def test_allowed_countries_must_be_two_letter_codes(countries):
+    from decline_desk.domain.models import CardControls
+
+    with pytest.raises(ValidationError):
+        CardControls(
+            card_id="c",
+            per_txn_limit_usd=Decimal("1"),
+            daily_limit_usd=Decimal("1"),
+            blocked_mccs=set(),
+            allowed_countries=countries,
+        )
+
+
+def test_employee_name_cannot_be_blank():
+    from decline_desk.domain.models import Employee
+
+    with pytest.raises(ValidationError):
+        Employee(id="e", company_id="c", name="", language="es")
