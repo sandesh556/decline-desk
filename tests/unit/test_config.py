@@ -72,3 +72,8 @@ def test_settings_read_from_environment(monkeypatch):
 
     assert settings.llm_mode is LLMMode.REPLAY
     assert settings.triage_model == "claude-haiku-test"
+
+
+@pytest.mark.parametrize("raw", ["LIVE", "Live", " live "])
+def test_mode_is_case_and_space_insensitive(raw):
+    assert make(llm_mode=raw, anthropic_api_key="sk-ant-x").llm_mode is LLMMode.LIVE
