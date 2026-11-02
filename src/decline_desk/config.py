@@ -6,7 +6,7 @@ Only live mode talks to the Anthropic API, so only live mode requires a key.
 
 from enum import StrEnum
 
-from pydantic import SecretStr
+from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -28,6 +28,11 @@ class Settings(BaseSettings):
     triage_model: str = "claude-haiku-4-5-20251001"
     resolver_model: str = "claude-sonnet-5-5"
     database_path: str = "declinedesk.sqlite3"
+
+    @field_validator("llm_mode", mode="before")
+    @classmethod
+    def _normalise_mode(cls, value: object) -> object:
+        return value.strip().lower() if isinstance(value, str) else value
 
     def validate_for_runtime(self) -> None:
         if self.llm_mode is not LLMMode.LIVE:
