@@ -11,7 +11,7 @@ from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from decline_desk.demo import Services
@@ -230,6 +230,39 @@ def create_app(svc: Services) -> FastAPI:
             return "rejected"
 
         return decide(ticket_id, request, act)
+
+    @app.get("/api/tickets/{ticket_id}")
+    def ticket_json(ticket_id: str, request: Request) -> JSONResponse:
+        user = current_user(request)
+        if user is None:
+            return JSONResponse({"error": "sign in required"}, status_code=401)
+        t = svc.store.get(ticket_id, user.company_id)
+        if t is None:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        pending_id = t.view.get("pending_action_id")
+        approval = svc.approvals.get(pending_id).status.value if pending_id else None
+        return JSONResponse(
+            {
+                "id": t.ticket.id,
+                "employee": t.employee_name,
+                "text": t.ticket.text,
+                "created_at": t.ticket.created_at.isoformat(),
+                "approval": approval,
+                **{
+                    k: t.view[k]
+                    for k in (
+                        "status",
+                        "language",
+                        "reply",
+                        "causes",
+                        "evidence",
+                        "action",
+                        "flags",
+                        "cost_usd",
+                    )
+                },
+            }
+        )
 
     @app.post("/login")
     def login(user: str = Form(...)):
