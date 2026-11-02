@@ -159,3 +159,11 @@ def test_cli_accepts_pause_and_limit():
 
     args = build_parser().parse_args(["--mode", "rules", "--limit", "5", "--pause", "4"])
     assert (args.limit, args.pause) == (5, 4.0)
+
+
+def test_unmeasured_rates_show_as_na_not_100_percent():
+    m = score([CaseResult("a", True, True, True, True, False, None, None, True, Decimal("0"), 1)])
+    assert m["injection_flagged"] is None and m["refusals_correct"] is None
+    text = render_markdown({"x": m}, title="t")
+    assert "| Injection attempts flagged | n/a |" in text
+    assert "| Bad model actions refused | n/a |" in text
