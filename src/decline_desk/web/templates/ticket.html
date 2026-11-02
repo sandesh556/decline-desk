@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Ticket {{ t.ticket.id }} - DeclineDesk{% endblock %}
+{% block content %}
+<p><a href="/">Back to inbox</a></p>
+{% if message %}<div class="notice">{{ message }}</div>{% endif %}
+
+<h1>{{ t.employee_name }} <span class="label{% if attention %} attention{% endif %}">{{ label }}</span></h1>
+<p class="muted">Received {{ received }} - language {{ t.view.language }} - ticket {{ t.ticket.id }}</p>
+
+<h2>Ticket</h2>
+<div class="panel text">{{ t.ticket.text }}</div>
+
+{% if flags %}
+<h2>Warnings</h2>
+<div class="panel"><ul>{% for f in flags %}<li>{{ f }}</li>{% endfor %}</ul></div>
+{% endif %}
+
+{% if causes %}
+<h2>Diagnosis</h2>
+<div class="panel">
+  <ul>{% for c, e in causes %}<li><strong>{{ c }}</strong>: {{ e }}</li>{% endfor %}</ul>
+  {% if t.view.authorization_id %}<p class="muted">Authorization {{ t.view.authorization_id }}</p>{% endif %}
+</div>
+{% endif %}
+
+<h2>Reply to send</h2>
+<div class="panel text">{{ t.view.reply }}</div>
+
+{% if action %}
+<h2>Proposed action</h2>
+<div class="panel">
+  <p>{{ action }}</p>
+  {% if can_decide %}
+  <div class="row">
+    <form method="post" action="/tickets/{{ t.ticket.id }}/approve">
+      <button class="btn" type="submit">Approve</button>
+    </form>
+    <form class="row" method="post" action="/tickets/{{ t.ticket.id }}/reject">
+      <input type="text" name="reason" placeholder="Reason for rejecting" aria-label="Reason">
+      <button class="btn secondary" type="submit">Reject</button>
+    </form>
+  </div>
+  {% elif approval_open %}
+  <p class="muted">Waiting for a company admin to approve.</p>
+  {% endif %}
+  {% if audit %}
+  <table style="margin-top:12px">
+    <thead><tr><th>Event</th><th>By</th><th>Detail</th></tr></thead>
+    <tbody>{% for e in audit %}<tr><td>{{ e.event }}</td><td>{{ e.actor }}</td><td class="muted">{{ e.detail }}</td></tr>{% endfor %}</tbody>
+  </table>
+  {% endif %}
+</div>
+{% endif %}
+
+<h2>Trace</h2>
+<table>
+  <thead><tr><th>Step</th><th>Model</th><th>Tokens in / out</th><th>Cost</th></tr></thead>
+  <tbody>
+  {% for s in t.view.trace %}
+  <tr><td>{{ s.name }}{% if s.note %} <span class="muted">({{ s.note }})</span>{% endif %}</td>
+      <td>{{ s.model or "-" }}</td>
+      <td>{% if s.model %}{{ s.input_tokens }} / {{ s.output_tokens }}{% else %}-{% endif %}</td>
+      <td>{% if s.model %}${{ s.cost_usd }}{% else %}-{% endif %}</td></tr>
+  {% endfor %}
+  <tr><td colspan="3"><strong>Total</strong></td><td><strong>${{ t.view.cost_usd }}</strong></td></tr>
+  </tbody>
+</table>
+{% endblock %}
