@@ -156,3 +156,28 @@ def test_stated_country_excludes_other_countries():
 
 def test_empty_history_is_not_found():
     assert run(Hints(merchant="Uber"), []).status is MatchStatus.NOT_FOUND
+
+
+# --- edge cases ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("merchant", ["", "   ", "😕", "!!!"])
+def test_a_merchant_hint_with_no_letters_is_ignored_not_used_to_exclude(merchant):
+    result = run(Hints(merchant=merchant), [auth("only")])
+    assert result.status is MatchStatus.MATCH
+
+
+def test_amount_in_a_different_local_currency_does_not_rule_a_charge_out():
+    result = run(Hints(merchant="Uber", amount=Decimal("100"), currency="BRL"), [auth("cop")])
+    assert result.authorization.id == "cop"
+
+
+def test_vague_ticket_with_only_approved_charges_is_not_found_rather_than_guessing():
+    result = run(Hints(), [auth("ok", code="00")])
+    assert result.status is MatchStatus.NOT_FOUND
+
+
+def test_same_timestamp_candidates_have_a_stable_order():
+    t = TICKET - timedelta(hours=1)
+    result = run(Hints(merchant="Uber"), [auth("b", when=t), auth("a", when=t)])
+    assert [a.id for a in result.candidates] == ["a", "b"]
