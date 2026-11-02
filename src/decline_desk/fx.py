@@ -18,7 +18,9 @@ class FXError(ValueError):
 def to_usd(amount: Decimal, currency: Currency, usd_per_unit: Decimal | None) -> Decimal:
     if not isinstance(amount, Decimal):
         raise TypeError("amount must be a Decimal, never a float")
-    if usd_per_unit is None or usd_per_unit <= 0:
+    if not amount.is_finite():
+        raise FXError(f"amount must be a finite number, got {amount}")
+    if usd_per_unit is None or not usd_per_unit.is_finite() or usd_per_unit <= 0:
         raise FXError(f"invalid FX rate for {currency}: {usd_per_unit}")
     if currency is Currency.USD and usd_per_unit != 1:
         raise FXError("USD must convert at rate 1")
