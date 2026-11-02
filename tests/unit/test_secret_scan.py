@@ -49,3 +49,20 @@ def test_env_file_is_gitignored_but_example_is_not():
 def test_pre_commit_hook_runs_the_scanner():
     hook = (REPO_ROOT / "scripts" / "pre-commit").read_text()
     assert "decline_desk.secret_scan" in hook
+
+
+def test_main_exit_codes_and_report(tmp_path, capsys):
+    from decline_desk.secret_scan import main
+
+    leaky = tmp_path / "leaky.env"
+    leaky.write_text(f"KEY={REAL_LOOKING_KEY}\n")
+    clean = tmp_path / "clean.py"
+    clean.write_text("ok = True\n")
+
+    assert main([str(clean)]) == 0
+    assert main([]) == 0
+    assert main([str(clean), str(leaky)]) == 1
+    err = capsys.readouterr().err
+    assert f"{leaky}:1" in err
+    assert "Commit blocked" in err
+    assert REAL_LOOKING_KEY not in err  # the report must not echo the secret itself

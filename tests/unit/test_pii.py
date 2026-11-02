@@ -64,3 +64,32 @@ def test_keeps_non_ascii_text_intact():
 )
 def test_luhn_check(digits, valid):
     assert luhn_valid(digits) is valid
+
+
+def test_masks_19_digit_card_numbers():
+    # 19-digit Luhn-valid number (Discover range)
+    pan = "6011000000000000001"
+    assert luhn_valid(pan)
+    assert mask_pii(f"card {pan}") == "card **** 0001"
+
+
+def test_does_not_mask_12_digit_luhn_valid_numbers():
+    assert luhn_valid("123456789007")
+    assert mask_pii("ref 123456789007") == "ref 123456789007"
+
+
+def test_two_cards_separated_by_one_space_are_both_masked():
+    assert mask_pii("4111111111111111 5555555555554444") == "**** 1111 **** 4444"
+
+
+def test_email_at_end_of_sentence_keeps_the_full_stop():
+    assert mask_pii("mail maria@andes.co.") == "mail [email]."
+
+
+def test_card_number_inside_punctuation():
+    assert mask_pii("(4111111111111111)") == "(**** 1111)"
+
+
+def test_local_numbers_without_country_code_are_not_treated_as_phones():
+    # Documented limitation: only +country numbers are masked, so amounts never are.
+    assert mask_pii("pague 3001234567 pesos") == "pague 3001234567 pesos"

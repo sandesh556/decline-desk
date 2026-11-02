@@ -139,3 +139,54 @@ def test_employee_lookup(repo):
     assert repo.employee("emp_b").language == "pt"
     with pytest.raises(NotFound):
         repo.employee("emp_zzz")
+
+
+# --- edge cases ---------------------------------------------------------------------------
+
+
+def test_employee_can_read_their_own_card(repo):
+    assert repo.card_for_employee("emp_a", "card_a").id == "card_a"
+
+
+def test_duplicate_ids_are_rejected(repo):
+    with pytest.raises(sqlite3.IntegrityError):
+        repo.add_authorization(auth("a_1", "card_a", T0))
+
+
+def test_card_for_unknown_employee_is_rejected(repo):
+    with pytest.raises(sqlite3.IntegrityError):
+        repo.add_card(
+            Card(
+                id="card_z",
+                employee_id="emp_ghost",
+                company_id="co_1",
+                last4="0000",
+                status="active",
+                expires=date(2028, 1, 1),
+            )
+        )
+
+
+def test_inverted_window_returns_nothing(repo):
+    assert repo.authorizations_for_employee("emp_a", since=T0, until=T0 - timedelta(days=1)) == []
+
+
+def test_employee_without_cards_gets_empty_lists(repo):
+    repo.add_employee(Employee(id="emp_c", company_id="co_1", name="New", language="en"))
+    assert repo.cards_for_employee("emp_c") == []
+    assert repo.authorizations_for_employee("emp_c", since=T0 - timedelta(days=30), until=T0) == []
+
+
+def test_microsecond_timestamps_keep_their_order(repo):
+    t = T0 + timedelta(minutes=1)
+    repo.add_authorization(auth("m_1", "card_a", t + timedelta(microseconds=1)))
+    repo.add_authorization(auth("m_2", "card_a", t + timedelta(microseconds=999_999)))
+    found = repo.authorizations_for_employee("emp_a", since=t, until=t + timedelta(seconds=1))
+    assert [a.id for a in found] == ["m_2", "m_1"]
+
+
+def test_unicode_merchant_and_exact_rate_round_trip(repo):
+    repo.add_authorization(auth("u_1", "card_a", T0, merchant="Panadería São Jorge ☕"))
+    [found] = repo.authorizations_for_employee("emp_a", since=T0, until=T0)
+    assert found.merchant_name == "Panadería São Jorge ☕"
+    assert found.usd_per_unit == Decimal("0.00025")

@@ -91,3 +91,34 @@ def test_nothing_is_dated_after_the_base_time():
     assert all(a.created_at <= BASE_TIME for a in all_auths(repo, employee_ids(repo)))
     assert BASE_TIME.tzinfo is UTC
     assert BASE_TIME == datetime(2026, 10, 28, 15, 0, tzinfo=UTC)
+
+
+def scenario(repo, scn_id):
+    [a] = [x for x in all_auths(repo, employee_ids(repo)) if x.id == scn_id]
+    return a
+
+
+def test_scenarios_are_consistent_with_card_controls():
+    """Each decline code must be explainable from the seeded controls, or Phase 2 rules
+    could never diagnose it."""
+    repo = seeded()
+    uber = scenario(repo, "scn_maria_uber_mx")
+    assert uber.country not in repo.controls_for_card(uber.card_id).allowed_countries
+
+    bar = scenario(repo, "scn_ana_bar")
+    assert bar.mcc in repo.controls_for_card(bar.card_id).blocked_mccs
+
+    laptop = scenario(repo, "scn_lucas_laptop")
+    assert laptop.amount_usd > repo.controls_for_card(laptop.card_id).per_txn_limit_usd
+
+    hotel = scenario(repo, "scn_carlos_hotel")
+    assert hotel.amount_usd > repo.company("co_andes").wallet_balance_usd
+
+
+def test_frozen_and_expired_scenarios_use_matching_cards():
+    repo = seeded()
+    frozen_fraud = repo.card_for_employee("emp_lucas", "card_lucas_old")
+    assert frozen_fraud.status is CardStatus.FROZEN_FRAUD
+    expired = scenario(repo, "scn_priya_old_card")
+    card = repo.card_for_employee("emp_priya", expired.card_id)
+    assert card.expires < expired.created_at.date()
