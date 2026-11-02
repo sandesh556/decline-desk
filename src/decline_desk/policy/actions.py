@@ -14,7 +14,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field, TypeAdapter, ValidationError, field_validator
 
-from decline_desk.domain.models import CardStatus, Frozen, Mcc, Text
+from decline_desk.domain.models import Authorization, CardStatus, Frozen, Mcc, Text
 from decline_desk.repo import NotFound, Repo
 from decline_desk.rules.diagnose import Cause, Diagnosis
 
@@ -78,13 +78,26 @@ def parse_action(raw: object) -> Action:
         raise PolicyViolation(f"not a valid action: {exc.error_count()} problem(s)") from exc
 
 
-def check_action(action: Action, *, employee_id: str, diagnosis: Diagnosis, repo: Repo) -> Action:
+def check_action(
+    action: Action,
+    *,
+    employee_id: str,
+    diagnosis: Diagnosis,
+    repo: Repo,
+    authorization: Authorization | None = None,
+) -> Action:
+    """Raise PolicyViolation unless the action is allowed. Pass the declined authorization
+    whenever it is known (the resolver always does) so the fix must target that exact card,
+    country and merchant category."""
     if diagnosis.escalate:
         raise PolicyViolation("diagnosis is escalated to a human; no automated action")
     try:
         card = repo.card_for_employee(employee_id, action.card_id)
     except NotFound:
         raise PolicyViolation("card not available to this employee") from None
+
+    if authorization is not None:
+        _check_targets(action, authorization)
 
     if not FIXES[type(action)] & set(diagnosis.causes):
         raise PolicyViolation(f"{action.type} does not address the diagnosed cause")
@@ -105,6 +118,16 @@ def check_action(action: Action, *, employee_id: str, diagnosis: Diagnosis, repo
         case UnfreezeCard() if Cause.CARD_EXPIRED in diagnosis.causes:
             raise PolicyViolation("card is expired; unfreezing it would not help")
     return action
+
+
+def _check_targets(action: Action, auth: Authorization) -> None:
+    mismatch = (
+        action.card_id != auth.card_id
+        or (isinstance(action, AllowCountry) and action.country != auth.country)
+        or (isinstance(action, UnblockMcc) and action.mcc != auth.mcc)
+    )
+    if mismatch:
+        raise PolicyViolation(f"{action.type} does not match the declined transaction")
 
 
 def _check_limit(action: TempLimitIncrease, current: Decimal, company) -> None:

@@ -216,12 +216,14 @@ def resolve(
             trace.append(TraceStep("verify", note=",".join(problems)))
         else:
             reply = draft.reply
-        action = _reconcile_action(draft.proposed_action, suggested, dx, employee.id, repo, flags)
+        action = _reconcile_action(
+            draft.proposed_action, suggested, dx, auth, employee.id, repo, flags
+        )
 
     pending_id = None
     if action is not None:
         pending = approvals.submit(
-            action, ticket_id=ticket.id, employee_id=employee.id, diagnosis=dx
+            action, ticket_id=ticket.id, employee_id=employee.id, diagnosis=dx, authorization=auth
         )
         pending_id = pending.id
     return done(Status.DRAFTED, reply, action=action, pending_action_id=pending_id, **common)
@@ -271,7 +273,9 @@ def _suggest_action(
         if candidate is None:
             continue
         try:
-            return check_action(candidate, employee_id=employee_id, diagnosis=dx, repo=repo)
+            return check_action(
+                candidate, employee_id=employee_id, diagnosis=dx, repo=repo, authorization=auth
+            )
         except PolicyViolation:
             return None  # the fix is out of bounds (e.g. above 2x): explain, don't act
     return None
@@ -281,6 +285,7 @@ def _reconcile_action(
     proposed: dict | None,
     suggested: Action | None,
     dx: Diagnosis,
+    auth: Authorization,
     employee_id: str,
     repo: Repo,
     flags: set[str],
@@ -290,7 +295,11 @@ def _reconcile_action(
         return suggested
     try:
         action = check_action(
-            parse_action(proposed), employee_id=employee_id, diagnosis=dx, repo=repo
+            parse_action(proposed),
+            employee_id=employee_id,
+            diagnosis=dx,
+            repo=repo,
+            authorization=auth,
         )
     except PolicyViolation as exc:
         flags.add(f"model_action_refused: {exc}")

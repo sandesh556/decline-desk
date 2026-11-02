@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 
+from decline_desk.domain.models import Authorization
 from decline_desk.policy.actions import (
     Action,
     AllowCountry,
@@ -88,9 +89,21 @@ class Approvals:
     # --- transitions ---------------------------------------------------------------------
 
     def submit(
-        self, action: Action, *, ticket_id: str, employee_id: str, diagnosis: Diagnosis
+        self,
+        action: Action,
+        *,
+        ticket_id: str,
+        employee_id: str,
+        diagnosis: Diagnosis,
+        authorization: Authorization | None = None,
     ) -> PendingAction:
-        check_action(action, employee_id=employee_id, diagnosis=diagnosis, repo=self.repo)
+        check_action(
+            action,
+            employee_id=employee_id,
+            diagnosis=diagnosis,
+            repo=self.repo,
+            authorization=authorization,
+        )
         action_id = f"act_{uuid.uuid4().hex[:12]}"
         with self.conn:
             self.conn.execute(
